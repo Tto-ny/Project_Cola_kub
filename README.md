@@ -5,3 +5,5 @@
 2. 663380034-6ณัฐดนัย สมสวย
 3. 663380522-3ติณณ์นภัส สร้างนา
 4. 663380268-1ธนธรณ์ ปลอดกลาง
+
+https://docs.google.com/document/d/1HjBcaM-6mChsDQkVM19qNbtROXXCE2nJIq4ajUom2LM/edit?tab=t.0
