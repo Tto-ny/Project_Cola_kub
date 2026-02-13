@@ -1,0 +1,25 @@
+# Backend Framework
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Google Earth Engine
+earthengine-api
+
+# Machine Learning & Data Processing
+pandas
+numpy
+scikit-learn
+joblib
+
+# Database
+sqlalchemy
+
+# Scheduling
+apscheduler
+
+# Environment Variables
+python-dotenv
+
+# Date/Time handling
+python-dateutil

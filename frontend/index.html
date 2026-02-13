@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏔️ Landslide Early Warning System - Northern Thailand</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>🏔️ Landslide Early Warning System</h1>
+                <p class="subtitle">ระบบเตือนภัยดินถล่มล่วงหน้า - ภาคเหนือ</p>
+            </div>
+            <div class="header-stats">
+                <div class="stat-item">
+                    <span class="stat-label">Last Update</span>
+                    <span class="stat-value" id="lastUpdate">Loading...</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <!-- Statistics -->
+                <div class="card">
+                    <h2 class="card-title">📊 Statistics</h2>
+                    <div class="stats-grid">
+                        <div class="stat-box danger">
+                            <div class="stat-icon">🔴</div>
+                            <div class="stat-info">
+                                <div class="stat-number" id="dangerCount">0</div>
+                                <div class="stat-label-small">Danger</div>
+                            </div>
+                        </div>
+                        <div class="stat-box warning">
+                            <div class="stat-icon">🟡</div>
+                            <div class="stat-info">
+                                <div class="stat-number" id="warningCount">0</div>
+                                <div class="stat-label-small">Warning</div>
+                            </div>
+                        </div>
+                        <div class="stat-box normal">
+                            <div class="stat-icon">🟢</div>
+                            <div class="stat-info">
+                                <div class="stat-number" id="normalCount">0</div>
+                                <div class="stat-label-small">Normal</div>
+                            </div>
+                        </div>
+                        <div class="stat-box total">
+                            <div class="stat-icon">📍</div>
+                            <div class="stat-info">
+                                <div class="stat-number" id="totalCount">0</div>
+                                <div class="stat-label-small">Total Locations</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="card">
+                    <h2 class="card-title">🔍 Filters</h2>
+                    <div class="filter-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="showDanger" checked>
+                            <span class="checkbox-custom danger"></span>
+                            <span>Show Danger</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="showWarning" checked>
+                            <span class="checkbox-custom warning"></span>
+                            <span>Show Warning</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="showNormal" checked>
+                            <span class="checkbox-custom normal"></span>
+                            <span>Show Normal</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Search -->
+                <div class="card">
+                    <h2 class="card-title">🔎 Search</h2>
+                    <input type="text" id="searchBox" class="search-input" placeholder="Search by district, tambon...">
+                    <div id="searchResults" class="search-results"></div>
+                </div>
+
+                <!-- Manual Update -->
+                <div class="card">
+                    <h2 class="card-title">⚙️ Actions</h2>
+                    <button id="manualUpdate" class="btn btn-primary">
+                        <span class="btn-icon">🔄</span>
+                        Manual Update
+                    </button>
+                    <p class="help-text">Next auto-update in <span id="nextUpdate">6 hours</span></p>
+                </div>
+            </aside>
+
+            <!-- Map -->
+            <main class="map-container">
+                <div id="map"></div>
+
+                <!-- Map Legend -->
+                <div class="map-legend">
+                    <h3>Risk Levels</h3>
+                    <div class="legend-item">
+                        <span class="legend-dot danger"></span>
+                        <span>Danger (≥60%)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-dot warning"></span>
+                        <span>Warning (30-60%)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-dot normal"></span>
+                        <span>Normal (<30%)< /span>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+    <!-- Chart.js for historical trends -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>

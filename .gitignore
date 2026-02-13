@@ -1,0 +1,29 @@
+# Virtual Environment
+landslide_env/
+venv/
+.venv/
+env/
+
+# Python bytecode/cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database
+*.db
+landslide_predictions.db
+
+# Environment variables (Crucial for security!)
+.env
+.env.example
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.vscode/
+.idea/
+
+# GEE credentials (if stored locally)
+.config/earthengine/
