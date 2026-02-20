@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+earthengine-api
+geemap
+pandas
+numpy
+asyncio
+pydantic
+apscheduler
+scikit-learn
