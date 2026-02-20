@@ -12,8 +12,9 @@ venv/
 .venv/
 env/
 .env
-*.pkl
-*.csv
+# Large data (optional)
+# *.csv
+# *.pkl
 
 # IDEs
 .vscode/
