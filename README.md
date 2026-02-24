@@ -27,11 +27,17 @@
 # เข้าสู่โฟลเดอร์โปรเจค
 cd backend
 
-# เปิดใช้งาน Virtual Environment (ถ้ามี)
+# 1. สร้าง Virtual Environment (ทำครั้งแรกครั้งเดียวในโฟลเดอร์หลักของโปรเจค)
+python -m venv venv
+
+# 2. เปิดใช้งาน Virtual Environment
 # Windows: ..\venv\Scripts\activate
 # Mac/Linux: source ../venv/bin/activate
 
-# รันเซิฟเวอร์ Uvicorn
+# 3. ติดตั้ง Dependencies แพลตฟอร์มและไลบรารีที่จำเป็น (ทำครั้งแรกครังเดียว)
+pip install -r requirements.txt
+
+# 4. รันเซิฟเวอร์ Uvicorn
 ..\venv\Scripts\uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 *💡 Backend จะรันอยู่ที่ `http://localhost:8000`*
