@@ -1,7 +1,10 @@
-from fastapi import FastAPI, BackgroundTasks, Query
+from fastapi import FastAPI, BackgroundTasks, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from database import get_db, GridCell, SessionLocal
 from services.gee_extractor import extract_gee_data
 from services.spatial_search import search_location, get_all_districts
 from services.predictor import predict_risk, predict_batch, load_model
@@ -69,12 +72,16 @@ def get_status():
     return extraction_status
 
 @app.get("/api/grid_data")
-def get_grid_data():
-    path = "extracted_grid_data.json"
-    if os.path.exists(path):
-        with open(path, 'r') as f:
-            return JSONResponse(content=json.load(f))
-    return JSONResponse(content=[])
+def get_grid_data(db: Session = Depends(get_db)):
+    cells = db.query(GridCell).all()
+    result = []
+    for c in cells:
+        result.append({
+            "polygon": c.polygon,
+            "properties": c.properties,
+            "risk": c.risk
+        })
+    return JSONResponse(content=result)
 
 # ── Spatial Search ──
 @app.get("/api/search")
@@ -97,13 +104,19 @@ def get_rainfall(lat: float = 18.8, lon: float = 100.78, hours: int = 24):
 
 # ── Manual Predict Now ──
 @app.post("/api/predict_now")
-def predict_now():
-    path = "extracted_grid_data.json"
-    if not os.path.exists(path):
-        return {"error": "No grid data. Run extraction first."}
+def predict_now(db: Session = Depends(get_db)):
+    cells = db.query(GridCell).all()
+    if not cells:
+        return {"error": "No grid data in database. Run extraction first."}
     
-    with open(path, 'r') as f:
-        grid_data = json.load(f)
+    # Reconstruct grid_data format for the pipeline
+    grid_data = []
+    for c in cells:
+        grid_data.append({
+            "polygon": c.polygon,
+            "properties": c.properties,
+            "risk": c.risk
+        })
     
     # 1. Fetch Spatial Rainfall & Interpolate 10 Days (117k points)
     print("Applying spatial interpolation from Open-Meteo...")
@@ -116,8 +129,14 @@ def predict_now():
     print("Running vectorized prediction batch...")
     results = predict_landslide_batch(grid_data, predictor_service._model, predictor_service._scaler)
     
-    with open("predicted_grid_data.json", 'w') as f:
-        json.dump(results, f)
+    # Save back to Postgres DB
+    print("Saving predictions to database...")
+    for i, row in enumerate(results):
+        cells[i].risk = row.get('risk', 'Low')
+        cells[i].prediction_probability = row.get('probability', 0)
+        cells[i].properties = row.get('properties', {})
+    
+    db.commit()
     
     # Calculate Summary
     rainfall_sample = results[0]['properties'].get('CHIRPS_Day_1', 0) if results else 0
@@ -137,12 +156,17 @@ def predict_now():
     return {"status": "done", "summary": summary}
 
 @app.get("/api/predicted_data")
-def get_predicted_data():
-    path = "predicted_grid_data.json"
-    if os.path.exists(path):
-        with open(path, 'r') as f:
-            return JSONResponse(content=json.load(f))
-    return JSONResponse(content=[])
+def get_predicted_data(db: Session = Depends(get_db)):
+    cells = db.query(GridCell).all()
+    result = []
+    for c in cells:
+        result.append({
+            "polygon": c.polygon,
+            "properties": c.properties,
+            "risk": c.risk,
+            "probability": c.prediction_probability
+        })
+    return JSONResponse(content=result)
 
 # ── What-If Simulation (uses cached grid data, no GEE call) ──
 class WhatIfRequest(BaseModel):
@@ -151,45 +175,31 @@ class WhatIfRequest(BaseModel):
     rainfall: float = 50.0
 
 @app.post("/api/whatif")
-def whatif_simulation(req: WhatIfRequest):
-    """Find nearest grid cell from cached data, apply custom rainfall, predict."""
-    path = "predicted_grid_data.json"
-    if not os.path.exists(path):
-        path = "extracted_grid_data.json" # Fallback if never predicted
-        if not os.path.exists(path):
-            return {"error": "No grid data. Run extraction first."}
+def whatif_simulation(req: WhatIfRequest, db: Session = Depends(get_db)):
+    """Find nearest grid cell via SQL, apply custom rainfall, predict."""
     
-    with open(path, 'r') as f:
-        grid_data = json.load(f)
+    # Use SQL math to find the closest Euclidean distance directly in Postgres
+    closest_cell = db.query(GridCell).order_by(
+        func.pow(GridCell.longitude - req.lon, 2) + func.pow(GridCell.latitude - req.lat, 2)
+    ).first()
     
-    # Find nearest cell
-    best = None
-    best_dist = float('inf')
-    for cell in grid_data:
-        poly = cell.get('polygon', [])
-        if not poly or len(poly) < 4:
-            continue
-        cx = sum(p[0] for p in poly[:4]) / 4
-        cy = sum(p[1] for p in poly[:4]) / 4
-        dist = math.sqrt((cx - req.lon)**2 + (cy - req.lat)**2)
-        if dist < best_dist:
-            best_dist = dist
-            best = cell
-    
-    if not best:
+    if not closest_cell:
         return {"error": "No nearby grid cell found"}
     
-    props = dict(best.get('properties', {}))
+    props = dict(closest_cell.properties)
     
-    # Map simulator rainfall: Spread over 7 days so Prior Soil Saturation triggers correctly
-    daily_rain = req.rainfall / 7.0
-    for i in range(1, 8):
-        props[f'CHIRPS_Day_{i}'] = daily_rain
-    for i in range(8, 11):
+    # Map simulator rainfall: The model features heavily rely on Prior Rain (Days 2, 3, 4)
+    # We will distribute the simulated storm over the past 3 days to trigger saturation
+    daily_rain = req.rainfall / 3.0
+    for i in range(1, 11):
         props[f'CHIRPS_Day_{i}'] = 0
         
+    props['CHIRPS_Day_2'] = daily_rain
+    props['CHIRPS_Day_3'] = daily_rain
+    props['CHIRPS_Day_4'] = daily_rain
+        
     # We must format it as a list to use the vectorized batch predictor
-    test_cell = {'polygon': best.get('polygon', []), 'properties': props}
+    test_cell = {'polygon': closest_cell.polygon, 'properties': props}
     if predictor_service._model is None:
         predictor_service.load_model()
         
@@ -219,7 +229,13 @@ def chat_endpoint(req: ChatRequest):
 # ── Scheduler ──
 def scheduled_prediction():
     print(f"\n[SCHEDULER] Running prediction at {datetime.now()}")
-    predict_now()
+    db = SessionLocal()
+    try:
+        predict_now(db)
+    except Exception as e:
+        print(f"[SCHEDULER] Error during prediction: {e}")
+    finally:
+        db.close()
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(scheduled_prediction, 'interval', hours=6, id='predict_6h')

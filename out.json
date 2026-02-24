@@ -1,0 +1,58 @@
+{
+  "7_days": {
+    "properties": {
+      "Slope": 21.2,
+      "Elevation": 1574,
+      "Distance_to_Road": 0.09,
+      "Aspect": 69.53,
+      "MODIS_LC": 10,
+      "NDVI": 0.87,
+      "NDWI": -0.79,
+      "TWI": 0.95,
+      "Soil_Type": 4,
+      "CHIRPS_Day_1": 714.2857142857143,
+      "CHIRPS_Day_2": 714.2857142857143,
+      "CHIRPS_Day_3": 714.2857142857143,
+      "CHIRPS_Day_4": 714.2857142857143,
+      "CHIRPS_Day_5": 714.2857142857143,
+      "CHIRPS_Day_6": 714.2857142857143,
+      "CHIRPS_Day_7": 714.2857142857143,
+      "CHIRPS_Day_8": 0,
+      "CHIRPS_Day_9": 0,
+      "CHIRPS_Day_10": 0,
+      "Rain_3D (mm)": 2142.857142857143,
+      "Rain_5D (mm)": 3571.4285714285716,
+      "Rain_7D (mm)": 4285.714285714286
+    },
+    "risk": "Medium",
+    "probability": 0.69
+  },
+  "1_day": {
+    "properties": {
+      "Slope": 21.2,
+      "Elevation": 1574,
+      "Distance_to_Road": 0.09,
+      "Aspect": 69.53,
+      "MODIS_LC": 10,
+      "NDVI": 0.87,
+      "NDWI": -0.79,
+      "TWI": 0.95,
+      "Soil_Type": 4,
+      "CHIRPS_Day_1": 5000,
+      "CHIRPS_Day_2": 0,
+      "CHIRPS_Day_3": 0,
+      "CHIRPS_Day_4": 0,
+      "CHIRPS_Day_5": 0,
+      "CHIRPS_Day_6": 0,
+      "CHIRPS_Day_7": 0,
+      "CHIRPS_Day_8": 0,
+      "CHIRPS_Day_9": 0,
+      "CHIRPS_Day_10": 0,
+      "Rain_3D (mm)": 0.0,
+      "Rain_5D (mm)": 0.0,
+      "Rain_7D (mm)": 0.0
+    },
+    "risk": "Medium",
+    "probability": 0.48
+  }
+}

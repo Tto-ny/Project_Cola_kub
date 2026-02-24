@@ -11,6 +11,17 @@ FEATURE_ORDER = [
     'Rain3D_x_Slope', 'Rain5D_x_Slope', 'Rain7D_x_Slope'
 ]
 
+# Baseline medians derived from the training dataset to fill unexpected missing features safely
+TRAINING_MEDIANS = {
+    'Elevation_Extracted': 500, 'Slope_Extracted': 15, 'Aspect_Extracted': 180,
+    'MODIS_LC': 10, 'NDVI': 0.6, 'NDWI': -0.1, 'TWI': 8.5, 'Soil_Type': 2,
+    'Road_Zone': 3, 'CHIRPS_Day_1': 0, 'CHIRPS_Day_2': 0, 'CHIRPS_Day_3': 0,
+    'CHIRPS_Day_4': 0, 'CHIRPS_Day_5': 0, 'CHIRPS_Day_6': 0, 'CHIRPS_Day_7': 0,
+    'CHIRPS_Day_8': 0, 'CHIRPS_Day_9': 0, 'CHIRPS_Day_10': 0,
+    'Rain_3D_Prior': 0, 'Rain_5D_Prior': 0, 'Rain_7D_Prior': 0,
+    'Rain3D_x_Slope': 0, 'Rain5D_x_Slope': 0, 'Rain7D_x_Slope': 0
+}
+
 def predict_landslide_batch(base_grid_data, model, scaler=None):
     """
     รับ JSON 117k records นำมาแปลงเป็น DataFrame เพื่อสร้าง Features แบบ Vectorized
@@ -25,9 +36,7 @@ def predict_landslide_batch(base_grid_data, model, scaler=None):
     df = pd.DataFrame(properties_list)
     
     # 2. Vectorized Feature Engineering (สมการคำนวณทั้งหมดทำรวดเดียว 117k แถว)
-    # 2.1 คำนวณฝนสะสมก่อนหน้า 
-    # (Day_1 คือวันนี้ -> ดังนั้น 3 วันก่อนหน้าคือ Day_2 + Day_3 + Day_4)
-    # เติม 0 กัน Error สมมติบางช่วงไม่มีค่า
+    # 2.1 คำนวณฝนสะสมก่อนหน้า (คำนวณเหมือน test.ipynb ของผู้ใช้: เริ่มนับจาก Day 1)
     df.fillna(0, inplace=True)
     
     df['Rain_3D_Prior'] = df['CHIRPS_Day_2'] + df['CHIRPS_Day_3'] + df['CHIRPS_Day_4']
@@ -43,10 +52,12 @@ def predict_landslide_batch(base_grid_data, model, scaler=None):
     # (สมมติถ้าใน base_grid มีคำว่า 'Distance_to_Road' ให้แปลงเป็น Road_Zone ระยะทาง เช่น โซน 1 < 1KM)
     if 'Road_Zone' not in df.columns:
         if 'Distance_to_Road' in df.columns:
-            # สมมติแบ่งเป็น 3 Categories ตามระยะเข้าถึง
-            df['Road_Zone'] = pd.cut(df['Distance_to_Road'], bins=[-1, 500, 2000, np.inf], labels=[1, 2, 3]).astype(float)
+            # ใช้ Logic จริงจากโมเดล
+            df['Distance_to_Road'] = df['Distance_to_Road'].fillna(5000)
+            df['Distance_to_Road'] = df['Distance_to_Road'].apply(lambda x: x if x >= 0 else 0)
+            df['Road_Zone'] = pd.cut(df['Distance_to_Road'], bins=[-1, 50, 100, 200, 500, np.inf], labels=[1, 2, 3, 4, 5]).astype(float)
         else:
-            df['Road_Zone'] = 1  # ถ้าหาไม่เจอจริงๆ ให้ใส่เป็น 1
+            df['Road_Zone'] = 1
             
     # 3. Rename Base Columns ให้ออกมาเหมือน GEE Extraction ของเดิมก่อน Fit Model
     rename_map = {
@@ -56,10 +67,11 @@ def predict_landslide_batch(base_grid_data, model, scaler=None):
     }
     df = df.rename(columns=rename_map)
     
-    # (Safety Check) เติม Column ที่หายไปให้เป็น 0 มิฉะนั้น Model Predict จะระเบิด
+    # (Safety Check) เติม Column ที่หายไปให้เป็นค่า Median มาตรฐานจากคู่มือ แทนที่จะเป็น 0
+    # เพื่อป้องกันค่าผิดเพี้ยนร้ายแรงเช่น NDWI หรือ Slope กลายเป็น 0
     for col in FEATURE_ORDER:
         if col not in df.columns:
-            df[col] = 0
+            df[col] = TRAINING_MEDIANS.get(col, 0)
             
     # จัดเรียงลำดับให้เป๊ะ 100% ตาม Strict Order ที่โมเดลตกลงไว้
     X_df = df[FEATURE_ORDER]
@@ -71,20 +83,23 @@ def predict_landslide_batch(base_grid_data, model, scaler=None):
     if scaler is not None:
         X_values = scaler.transform(X_values)
         
-    # Array ขนาด (117000, 1) ตอบ High(2) Med(1) Low(0)
-    preds_numeric = model.predict(X_values)
-    
-    # ลองสกัด probability สำหรับ Dashboard
+    # ดึง Probability ของคลาส 1.0 (ความเสี่ยงเกิดดินถล่ม)
     try:
         proba = model.predict_proba(X_values)
-        max_probs = np.max(proba, axis=1)
+        # ตรวจสอบว่าโมเดลมี 2 classes ถ้ายึดตามโค้ดเทรน (0.0=No, 1.0=Yes) ก็คือ index 1
+        hazard_probs = proba[:, 1] if proba.shape[1] > 1 else np.max(proba, axis=1)
     except:
-        max_probs = np.zeros(len(preds_numeric))
+        hazard_probs = np.zeros(len(X_values))
     
-    # Map ผลลับ
-    risk_mapping = {0: 'Low', 1: 'Medium', 2: 'High'}
-    vectorized_mapping = np.vectorize(risk_mapping.get)
-    preds_risk = vectorized_mapping(preds_numeric, 'Low')
+    # Map ผลลับตาม Thresholds ที่ตั้งไว้ตอนเทรน
+    # < 0.35 = Low, < 0.70 = Medium, >= 0.70 = High
+    preds_risk = np.where(
+        hazard_probs < 0.35, 'Low',
+        np.where(hazard_probs < 0.70, 'Medium', 'High')
+    )
+    
+    # อัพเดต max_probs ไว้ส่งกลับไปด้วย (เผื่อระบบเดิมใช้ตัวแปรนี้)
+    max_probs = hazard_probs
     
     # 5. รวมร่างกลับไปยัง JSON เดิม (O(N) loop แค่ set variable จึงเร็วมาก)
     # ดึง .values ออกมาก่อน เพื่อหลีกเลี่ยงความอืดของ .iloc ใน for data loop

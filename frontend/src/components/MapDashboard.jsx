@@ -6,7 +6,7 @@ import { PolygonLayer, ScatterplotLayer } from '@deck.gl/layers';
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 const API = 'http://localhost:8000';
 const INITIAL_VIEW = { longitude: 100.85, latitude: 18.8, zoom: 9, pitch: 0, bearing: 0 };
-const RISK_COLORS = { High: [255, 40, 40, 210], Medium: [255, 165, 0, 200], Low: [0, 230, 180, 180] };
+const RISK_COLORS = { High: [255, 40, 40, 210], Medium: [255, 165, 0, 200], Low: [100, 120, 130, 80] };
 
 export default function MapDashboard() {
     const [gridData, setGridData] = useState([]);
@@ -69,11 +69,11 @@ export default function MapDashboard() {
             id: 'risk-grid',
             // ถ้ายืนยันว่า risk ไม่มี หรือ risk เป็นค่าที่เปิด Filter ไว้ ถึงจะแสด
             data: data.filter(d => !d.risk || f[d.risk]),
-            pickable: true, stroked: true,
-            filled: true, extruded: false, lineWidthMinPixels: 0.3,
+            pickable: true, stroked: false,
+            filled: true, extruded: false,
             getPolygon: d => d.polygon,
             getFillColor: d => RISK_COLORS[d.risk] || [128, 128, 128, 150], // สีเทาเริ่มต้น
-            getLineColor: [30, 30, 30, 60], getLineWidth: 1, updateTriggers: { getFillColor: [f] }
+            updateTriggers: { getFillColor: [f] }
         }));
         if (pin) {
             arr.push(new ScatterplotLayer({
@@ -214,7 +214,7 @@ export default function MapDashboard() {
         }),
     };
 
-    const riskColor = (r) => r === 'High' ? '#ef4444' : r === 'Medium' ? '#f97316' : '#06d6a0';
+    const riskColor = (r) => r === 'High' ? '#ef4444' : r === 'Medium' ? '#f97316' : '#71717a';
 
     return (
         <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
@@ -288,7 +288,7 @@ export default function MapDashboard() {
                         {stats.total > 0 && (
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4, marginBottom: 12 }}>
                                 {[['Total', stats.total, '#1e293b'], ['High', stats.high, 'rgba(255,40,40,0.12)'],
-                                ['Med', stats.med, 'rgba(255,165,0,0.1)'], ['Low', stats.low, 'rgba(0,230,180,0.1)']].map(([l, v, bg]) => (
+                                ['Med', stats.med, 'rgba(255,165,0,0.1)'], ['Low', stats.low, 'rgba(113,113,122,0.1)']].map(([l, v, bg]) => (
                                     <div key={l} style={{ background: bg, borderRadius: 6, padding: '5px 0', textAlign: 'center', fontSize: 10 }}>
                                         <div style={{ fontWeight: 700, fontSize: 14 }}>{v.toLocaleString()}</div>
                                         <div style={{ color: '#6b7280' }}>{l}</div>
