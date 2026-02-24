@@ -4,10 +4,18 @@ import sys
 import math
 from datetime import datetime, timedelta
 
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 def initialize_gee():
     try:
         print("Initializing Google Earth Engine...")
-        ee.Initialize(project='arched-wharf-485715-f9')
+        project_id = os.getenv("GEE_PROJECT_ID")
+        if not project_id:
+            raise ValueError("GEE_PROJECT_ID is not set in the environment.")
+        ee.Initialize(project=project_id)
         print("GEE Initialized successfully.")
     except Exception as e:
         print(f"Error initializing GEE: {e}")
@@ -98,9 +106,10 @@ def build_combined_image():
                            ndvi_filled, ndwi_filled, distance_to_road]))
     return combined.unmask(0)
 
-def extract_gee_data():
+def extract_gee_data(progress_callback=None):
     """
     Generate full regular 500x500m grid and extract GEE features in chunks.
+    progress_callback: A function(current_chunk, total_chunks, current_valid)
     """
     initialize_gee()
     
@@ -125,6 +134,9 @@ def extract_gee_data():
     nodata_total = 0
     
     for chunk_idx in range(num_chunks):
+        if progress_callback:
+            progress_callback(chunk_idx + 1, num_chunks, len(all_valid))
+            
         start = chunk_idx * CHUNK_SIZE
         end = min(start + CHUNK_SIZE, total)
         chunk = grid[start:end]

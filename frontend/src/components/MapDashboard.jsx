@@ -41,18 +41,38 @@ export default function MapDashboard() {
 
     useEffect(() => {
         fetch(`${API}/api/districts`).then(r => r.json()).then(setDistricts).catch(() => { });
-        fetch(`${API}/api/grid_data`).then(r => r.json()).then(data => {
-            if (data.length > 0) { setGridData(data); setStatus(`${data.length} cells loaded`); addLog(`Auto-loaded ${data.length} cells`); }
+
+        // ลองดึงข้อมูลทํานายล่าสุดมาก่อน ถ้ามีก็สบายเลย ไม่ต้องรอ predict ใหม่
+        fetch(`${API}/api/predicted_data`).then(r => r.json()).then(data => {
+            if (data && data.length > 0) {
+                setGridData(data);
+                setStatus(`Loaded ${data.length} predicted cells`);
+                addLog(`Auto-loaded ${data.length} predicted cells`);
+            } else {
+                // ถ้ายังไม่มี predicted ให้ดึง grid เปล่าๆ มาก่อน
+                fetch(`${API}/api/grid_data`).then(r => r.json()).then(grid => {
+                    if (grid.length > 0) {
+                        setGridData(grid);
+                        setStatus(`${grid.length} raw cells loaded`);
+                        addLog(`Auto-loaded ${grid.length} raw cells`);
+                    }
+                }).catch(() => { });
+            }
         }).catch(() => { });
+
         fetchAlerts();
     }, []);
 
     const buildLayers = useCallback((data, f, pin) => {
         const arr = [];
         arr.push(new PolygonLayer({
-            id: 'risk-grid', data: data.filter(d => f[d.risk]), pickable: true, stroked: true,
+            id: 'risk-grid',
+            // ถ้ายืนยันว่า risk ไม่มี หรือ risk เป็นค่าที่เปิด Filter ไว้ ถึงจะแสด
+            data: data.filter(d => !d.risk || f[d.risk]),
+            pickable: true, stroked: true,
             filled: true, extruded: false, lineWidthMinPixels: 0.3,
-            getPolygon: d => d.polygon, getFillColor: d => RISK_COLORS[d.risk] || [128, 128, 128, 100],
+            getPolygon: d => d.polygon,
+            getFillColor: d => RISK_COLORS[d.risk] || [128, 128, 128, 150], // สีเทาเริ่มต้น
             getLineColor: [30, 30, 30, 60], getLineWidth: 1, updateTriggers: { getFillColor: [f] }
         }));
         if (pin) {
@@ -201,9 +221,35 @@ export default function MapDashboard() {
             <DeckGL viewState={viewState} onViewStateChange={({ viewState: v }) => setViewState(v)}
                 onClick={handleMapClick} controller={true} layers={layers}
                 getCursor={() => whatIfMode ? 'crosshair' : 'grab'}
-                getTooltip={({ object }) => object?.risk && {
-                    html: `<div style="font:12px monospace;line-height:1.6"><b style="color:${riskColor(object.risk)}">● ${object.risk} Risk</b><br/>Slope: ${object.properties?.Slope?.toFixed(1) ?? '-'}°<br/>Elev: ${object.properties?.Elevation?.toFixed(0) ?? '-'}m<br/>NDVI: ${object.properties?.NDVI?.toFixed(3) ?? '-'}</div>`,
-                    style: { background: '#1e1e2f', color: '#eee', borderRadius: 8, padding: 10, border: '1px solid #333' }
+                getTooltip={({ object }) => {
+                    if (!object) return null;
+                    const props = object.properties || {};
+                    let tooltipHtml = `<div style="font:11px monospace;line-height:1.5;max-width:250px;">`;
+                    if (object.risk) {
+                        tooltipHtml += `<b style="color:${riskColor(object.risk)};font-size:13px;">● ${object.risk} Risk</b>`;
+                        if (object.probability !== undefined) {
+                            tooltipHtml += ` <span style="color:#aaa;">(${(object.probability * 100).toFixed(1)}%)</span><br/>`;
+                        } else {
+                            tooltipHtml += `<br/>`;
+                        }
+                    } else {
+                        tooltipHtml += `<b style="color:#aaa;font-size:13px;">● Unknown Risk</b><br/>`;
+                    }
+                    tooltipHtml += `<div style="margin-top:4px;border-top:1px solid #333;padding-top:4px;display:grid;grid-template-columns:1fr 1fr;gap:4px;">`;
+
+                    for (const [key, value] of Object.entries(props)) {
+                        let displayValue = value;
+                        if (typeof value === 'number') {
+                            displayValue = value % 1 === 0 ? value : value.toFixed(2);
+                        }
+                        tooltipHtml += `<div><span style="color:#888;">${key}:</span> ${displayValue}</div>`;
+                    }
+                    tooltipHtml += `</div></div>`;
+
+                    return {
+                        html: tooltipHtml,
+                        style: { background: 'rgba(20,20,30,0.95)', color: '#eee', borderRadius: 8, padding: 10, border: '1px solid #444', backdropFilter: 'blur(4px)' }
+                    };
                 }}>
                 <Map mapStyle={MAP_STYLE} />
             </DeckGL>

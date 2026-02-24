@@ -2,7 +2,7 @@
 Prediction service that loads the trained Random Forest model and scaler,
 fetches rainfall from Open-Meteo, and predicts landslide risk.
 """
-import pickle
+import joblib
 import numpy as np
 import os
 
@@ -16,16 +16,14 @@ _scaler = None
 def load_model():
     global _model, _scaler
     try:
-        with open(MODEL_PATH, 'rb') as f:
-            _model = pickle.load(f)
+        _model = joblib.load(MODEL_PATH)
         print(f"Model loaded from {MODEL_PATH}")
     except Exception as e:
         print(f"WARNING: Could not load model: {e}")
         _model = None
     
     try:
-        with open(SCALER_PATH, 'rb') as f:
-            _scaler = pickle.load(f)
+        _scaler = joblib.load(SCALER_PATH)
         print(f"Scaler loaded from {SCALER_PATH}")
     except Exception as e:
         print(f"WARNING: Could not load scaler: {e}")

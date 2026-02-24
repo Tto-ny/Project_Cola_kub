@@ -7,8 +7,14 @@ from services.spatial_search import search_location, get_all_districts
 from services.predictor import predict_risk, predict_batch, load_model
 from services.rainfall import fetch_rainfall
 from services.chatbot import chat as chatbot_answer
-import json, os, math
+from services.rainfall_pipeline import apply_spatial_interpolation
+import json, os, math, sys
 from datetime import datetime
+
+# Add root dir to path so we can import modifier_data
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from modifier_data import predict_landslide_batch
+import services.predictor as predictor_service
 from apscheduler.schedulers.background import BackgroundScheduler
 
 app = FastAPI(title="Landslide Early Warning API")
@@ -29,9 +35,18 @@ def on_startup():
 # ── GEE Extraction ──
 def run_extraction():
     global extraction_status
-    extraction_status = {"status": "running", "message": "Extracting GEE data..."}
+    extraction_status = {"status": "running", "message": "Starting GEE extraction..."}
+    
+    def update_progress(current_chunk, total_chunks, valid_cells):
+        global extraction_status
+        percentage = int((current_chunk / total_chunks) * 100)
+        extraction_status = {
+            "status": "running", 
+            "message": f"Downloading GEE: {percentage}% (Chunk {current_chunk}/{total_chunks}) | Valid: {valid_cells} cells"
+        }
+        
     try:
-        result = extract_gee_data()
+        result = extract_gee_data(progress_callback=update_progress)
         extraction_status = {"status": "done", "message": f"Done. {len(result)} cells.", "count": len(result)}
         alert_logs.insert(0, {"id": len(alert_logs)+1, "timestamp": datetime.now().isoformat(),
             "type": "extraction", "message": f"GEE extraction: {len(result)} cells", "severity": "info"})
@@ -90,25 +105,33 @@ def predict_now():
     with open(path, 'r') as f:
         grid_data = json.load(f)
     
-    rain = fetch_rainfall(lat=18.8, lon=100.78, hours=24)
-    rainfall_mm = rain.get("total_mm", 0)
+    # 1. Fetch Spatial Rainfall & Interpolate 10 Days (117k points)
+    print("Applying spatial interpolation from Open-Meteo...")
+    grid_data = apply_spatial_interpolation(grid_data)
     
-    results = predict_batch(grid_data, rainfall_mm)
+    # 2. Vectorized Feature Engineering & Prediction (Pandas)
+    if predictor_service._model is None:
+        predictor_service.load_model()
+        
+    print("Running vectorized prediction batch...")
+    results = predict_landslide_batch(grid_data, predictor_service._model, predictor_service._scaler)
     
     with open("predicted_grid_data.json", 'w') as f:
         json.dump(results, f)
     
+    # Calculate Summary
+    rainfall_sample = results[0]['properties'].get('CHIRPS_Day_1', 0) if results else 0
     summary = {
         "total": len(results),
         "high": sum(1 for r in results if r['risk'] == 'High'),
         "medium": sum(1 for r in results if r['risk'] == 'Medium'),
         "low": sum(1 for r in results if r['risk'] == 'Low'),
-        "rainfall_mm": rainfall_mm,
+        "rainfall_mm": round(rainfall_sample, 2), # Sample point for the dashboard
         "timestamp": datetime.now().isoformat()
     }
     
     alert_logs.insert(0, {"id": len(alert_logs)+1, "timestamp": datetime.now().isoformat(),
-        "type": "prediction", "message": f"Predicted {summary['total']} cells. Rain={rainfall_mm}mm. High={summary['high']}", 
+        "type": "prediction", "message": f"Predicted {summary['total']} cells. Sample Rain={summary['rainfall_mm']}mm. High={summary['high']}", 
         "severity": "warning" if summary['high'] > 0 else "info"})
     
     return {"status": "done", "summary": summary}
@@ -130,9 +153,11 @@ class WhatIfRequest(BaseModel):
 @app.post("/api/whatif")
 def whatif_simulation(req: WhatIfRequest):
     """Find nearest grid cell from cached data, apply custom rainfall, predict."""
-    path = "extracted_grid_data.json"
+    path = "predicted_grid_data.json"
     if not os.path.exists(path):
-        return {"error": "No grid data. Run extraction first."}
+        path = "extracted_grid_data.json" # Fallback if never predicted
+        if not os.path.exists(path):
+            return {"error": "No grid data. Run extraction first."}
     
     with open(path, 'r') as f:
         grid_data = json.load(f)
@@ -144,7 +169,6 @@ def whatif_simulation(req: WhatIfRequest):
         poly = cell.get('polygon', [])
         if not poly or len(poly) < 4:
             continue
-        # Centroid of polygon
         cx = sum(p[0] for p in poly[:4]) / 4
         cy = sum(p[1] for p in poly[:4]) / 4
         dist = math.sqrt((cx - req.lon)**2 + (cy - req.lat)**2)
@@ -156,9 +180,24 @@ def whatif_simulation(req: WhatIfRequest):
         return {"error": "No nearby grid cell found"}
     
     props = dict(best.get('properties', {}))
-    props['Rainfall'] = req.rainfall
     
-    prediction = predict_risk(props)
+    # Map simulator rainfall: Spread over 7 days so Prior Soil Saturation triggers correctly
+    daily_rain = req.rainfall / 7.0
+    for i in range(1, 8):
+        props[f'CHIRPS_Day_{i}'] = daily_rain
+    for i in range(8, 11):
+        props[f'CHIRPS_Day_{i}'] = 0
+        
+    # We must format it as a list to use the vectorized batch predictor
+    test_cell = {'polygon': best.get('polygon', []), 'properties': props}
+    if predictor_service._model is None:
+        predictor_service.load_model()
+        
+    result_batch = predict_landslide_batch([test_cell], predictor_service._model, predictor_service._scaler)
+    prediction = {
+        "risk": result_batch[0].get('risk', 'Low'),
+        "probability": result_batch[0].get('probability', 0)
+    }
     
     return {
         "coordinates": [req.lon, req.lat],
