@@ -172,7 +172,7 @@ def get_predicted_data(db: Session = Depends(get_db)):
 class WhatIfRequest(BaseModel):
     lat: float
     lon: float
-    rainfall: float = 50.0
+    rainfall_days: list[float]  # Array of 10 days [Day10, Day9, ..., Day1]
 
 @app.post("/api/whatif")
 def whatif_simulation(req: WhatIfRequest, db: Session = Depends(get_db)):
@@ -188,16 +188,18 @@ def whatif_simulation(req: WhatIfRequest, db: Session = Depends(get_db)):
     
     props = dict(closest_cell.properties)
     
-    # Map simulator rainfall: The model features heavily rely on Prior Rain (Days 2, 3, 4)
-    # We will distribute the simulated storm over the past 3 days to trigger saturation
-    daily_rain = req.rainfall / 3.0
-    for i in range(1, 11):
-        props[f'CHIRPS_Day_{i}'] = 0
-        
-    props['CHIRPS_Day_2'] = daily_rain
-    props['CHIRPS_Day_3'] = daily_rain
-    props['CHIRPS_Day_4'] = daily_rain
-        
+    # Map simulator rainfall from 10-day array
+    # Frontend array is [Day10, Day9, Day8 ... Day1] based on standard display
+    # Let's map it backwards so idx 9 -> Day 1, idx 8 -> Day 2, etc.
+    if req.rainfall_days and len(req.rainfall_days) == 10:
+        for idx, val in enumerate(req.rainfall_days):
+            day_num = 10 - idx
+            props[f'CHIRPS_Day_{day_num}'] = val
+    else:
+        # Fallback if somehow array isn't 10
+        for i in range(1, 11):
+            props[f'CHIRPS_Day_{i}'] = 0
+            
     # We must format it as a list to use the vectorized batch predictor
     test_cell = {'polygon': closest_cell.polygon, 'properties': props}
     if predictor_service._model is None:
@@ -211,7 +213,7 @@ def whatif_simulation(req: WhatIfRequest, db: Session = Depends(get_db)):
     
     return {
         "coordinates": [req.lon, req.lat],
-        "rainfall_input": req.rainfall,
+        "rainfall_total": sum(req.rainfall_days) if req.rainfall_days else 0,
         "features": props,
         "prediction": prediction,
         "timestamp": datetime.now().isoformat()

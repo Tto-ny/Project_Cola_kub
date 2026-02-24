@@ -21,7 +21,7 @@ export default function MapDashboard() {
     const [searchQuery, setSearchQuery] = useState('');
     const [districts, setDistricts] = useState([]);
     const [whatIfMode, setWhatIfMode] = useState(false);
-    const [whatIfRain, setWhatIfRain] = useState(50);
+    const [whatIfRainDays, setWhatIfRainDays] = useState(Array(10).fill(0));
     const [whatIfResult, setWhatIfResult] = useState(null);
     const [whatIfPin, setWhatIfPin] = useState(null);
     const [predicting, setPredicting] = useState(false);
@@ -136,11 +136,11 @@ export default function MapDashboard() {
 
     const runWhatIf = async () => {
         if (!whatIfPin) return;
-        setPredicting(true); addLog(`What-If: rain=${whatIfRain}mm`);
+        setPredicting(true); addLog(`What-If: rain 10 days array`);
         try {
             const data = await (await fetch(`${API}/api/whatif`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ lat: whatIfPin[1], lon: whatIfPin[0], rainfall: whatIfRain })
+                body: JSON.stringify({ lat: whatIfPin[1], lon: whatIfPin[0], rainfall_days: whatIfRainDays })
             })).json();
             setWhatIfResult(data); addLog(`Result: ${data.prediction?.risk || data.error}`);
         } catch (e) { addLog(`Error: ${e.message}`); }
@@ -263,7 +263,7 @@ export default function MapDashboard() {
 
                 {/* Tabs */}
                 <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    {[['map', '🗺️ Map'], ['whatif', '🎯 What-If'], ['chat', '💬 Chat'], ['alerts', '🔔 Alerts']].map(([k, l]) => (
+                    {[['map', '🗺️ Map'], ['whatif', '🎯 What-If'], ['alerts', '🔔 Alerts']].map(([k, l]) => (
                         <button key={k} style={S.tab(tab === k)} onClick={() => { setTab(k); if (k === 'alerts') fetchAlerts(); }}>
                             {l}
                         </button>
@@ -341,8 +341,25 @@ export default function MapDashboard() {
                         {whatIfPin && (
                             <div style={{ marginBottom: 12 }}>
                                 <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>📍 {whatIfPin[0].toFixed(5)}, {whatIfPin[1].toFixed(5)}</div>
-                                <div style={S.label}>Rainfall (mm)</div>
-                                <input type="number" value={whatIfRain} onChange={e => setWhatIfRain(Number(e.target.value))} style={{ ...S.input, marginBottom: 10 }} />
+                                <div style={S.label}>Rainfall (mm) - Past 10 Days</div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px', marginBottom: 12 }}>
+                                    {whatIfRainDays.map((val, idx) => (
+                                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <span style={{ fontSize: 10, color: '#9ca3af', width: 35 }}>Day {10 - idx}:</span>
+                                            <input
+                                                type="number"
+                                                value={val === 0 ? '' : val}
+                                                placeholder="0"
+                                                onChange={e => {
+                                                    const newArr = [...whatIfRainDays];
+                                                    newArr[idx] = Number(e.target.value);
+                                                    setWhatIfRainDays(newArr);
+                                                }}
+                                                style={{ ...S.input, padding: '4px 6px', marginBottom: 0 }}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
                                 <button onClick={runWhatIf} disabled={predicting} style={S.btn(predicting ? '#374151' : 'linear-gradient(135deg,#f59e0b,#ef4444)')}>
                                     {predicting ? '⏳...' : '⚡ Predict This Point'}
                                 </button>
@@ -358,7 +375,7 @@ export default function MapDashboard() {
                                 </div>
                                 <div style={{ fontSize: 11, color: '#9ca3af', lineHeight: 1.8 }}>
                                     Probability: {(whatIfResult.prediction.probability * 100).toFixed(1)}%<br />
-                                    Rainfall: {whatIfResult.rainfall_input} mm<br />
+                                    Total 10D Rain: {whatIfResult.rainfall_total?.toFixed(1)} mm<br />
                                     Slope: {whatIfResult.features?.Slope?.toFixed(1)}°<br />
                                     Elevation: {whatIfResult.features?.Elevation?.toFixed(0)}m
                                 </div>
@@ -367,50 +384,7 @@ export default function MapDashboard() {
                         {whatIfResult?.error && <div style={{ padding: 10, borderRadius: 6, background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 12 }}>Error: {whatIfResult.error}</div>}
                     </>)}
 
-                    {/* ──── CHAT TAB ──── */}
-                    {tab === 'chat' && (
-                        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                            <div style={S.label}>Landslide AI Assistant</div>
-                            <div ref={chatRef} style={{
-                                flex: 1, minHeight: 300, overflowY: 'auto', marginBottom: 10,
-                                background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: 10
-                            }}>
-                                {chatMessages.map((m, i) => (
-                                    <div key={i} style={{
-                                        marginBottom: 10, display: 'flex',
-                                        justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start'
-                                    }}>
-                                        <div style={{
-                                            maxWidth: '85%', padding: '8px 12px', borderRadius: 10,
-                                            background: m.role === 'user' ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.06)',
-                                            color: m.role === 'user' ? '#93c5fd' : '#d1d5db',
-                                            fontSize: 12, lineHeight: 1.6,
-                                            borderBottomRightRadius: m.role === 'user' ? 2 : 10,
-                                            borderBottomLeftRadius: m.role === 'bot' ? 2 : 10,
-                                            whiteSpace: 'pre-wrap'
-                                        }}>
-                                            {m.text.split('**').map((part, j) =>
-                                                j % 2 === 0 ? part : <b key={j}>{part}</b>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                                {chatLoading && (
-                                    <div style={{ fontSize: 11, color: '#6b7280', padding: '4px 8px' }}>🤖 กำลังคิด...</div>
-                                )}
-                            </div>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                                <input style={{ ...S.input, flex: 1 }} placeholder="ถามอะไรก็ได้เกี่ยวกับดินถล่ม..."
-                                    value={chatInput} onChange={e => setChatInput(e.target.value)}
-                                    onKeyDown={e => e.key === 'Enter' && sendChat()} />
-                                <button onClick={sendChat} disabled={chatLoading} style={{
-                                    padding: '0 14px', borderRadius: 6, border: 'none',
-                                    background: chatLoading ? '#374151' : '#3b82f6',
-                                    color: '#fff', cursor: 'pointer', fontSize: 12
-                                }}>➤</button>
-                            </div>
-                        </div>
-                    )}
+                    {/* ──── CHAT BLOCK MOVED TO BOTTOM ──── */}
 
                     {/* ──── ALERTS TAB ──── */}
                     {tab === 'alerts' && (<>
@@ -429,6 +403,50 @@ export default function MapDashboard() {
                         }
                     </>)}
                 </div>
+
+                {/* ──── PERSISTENT CHAT ──── */}
+                <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.2)' }}>
+                    <div style={{ ...S.label, marginBottom: 8 }}>💬 AI Assistant</div>
+                    <div ref={chatRef} style={{
+                        height: 200, overflowY: 'auto', marginBottom: 10,
+                        background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: 10
+                    }}>
+                        {chatMessages.map((m, i) => (
+                            <div key={i} style={{
+                                marginBottom: 10, display: 'flex',
+                                justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start'
+                            }}>
+                                <div style={{
+                                    maxWidth: '85%', padding: '8px 12px', borderRadius: 10,
+                                    background: m.role === 'user' ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.06)',
+                                    color: m.role === 'user' ? '#93c5fd' : '#d1d5db',
+                                    fontSize: 12, lineHeight: 1.6,
+                                    borderBottomRightRadius: m.role === 'user' ? 2 : 10,
+                                    borderBottomLeftRadius: m.role === 'bot' ? 2 : 10,
+                                    whiteSpace: 'pre-wrap'
+                                }}>
+                                    {m.text.split('**').map((part, j) =>
+                                        j % 2 === 0 ? part : <b key={j}>{part}</b>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                        {chatLoading && (
+                            <div style={{ fontSize: 11, color: '#6b7280', padding: '4px 8px' }}>🤖 กำลังคิด...</div>
+                        )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                        <input style={{ ...S.input, flex: 1 }} placeholder="ถามอะไรก็ได้..."
+                            value={chatInput} onChange={e => setChatInput(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && sendChat()} />
+                        <button onClick={sendChat} disabled={chatLoading} style={{
+                            padding: '0 14px', borderRadius: 6, border: 'none',
+                            background: chatLoading ? '#374151' : '#3b82f6',
+                            color: '#fff', cursor: 'pointer', fontSize: 12
+                        }}>➤</button>
+                    </div>
+                </div>
+
             </div>
         </div>
     );
