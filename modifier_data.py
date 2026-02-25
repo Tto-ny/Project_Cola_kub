@@ -7,8 +7,8 @@ FEATURE_ORDER = [
     'CHIRPS_Day_6', 'CHIRPS_Day_7', 'CHIRPS_Day_8', 'CHIRPS_Day_9', 'CHIRPS_Day_10', 
     'Elevation_Extracted', 'Slope_Extracted', 'Aspect_Extracted', 'MODIS_LC', 
     'NDVI', 'NDWI', 'TWI', 'Soil_Type', 'Road_Zone', 
-    'Rain_3D_Prior', 'Rain_5D_Prior', 'Rain_7D_Prior', 
-    'Rain3D_x_Slope', 'Rain5D_x_Slope', 'Rain7D_x_Slope'
+    'Rain_3D_Prior', 'Rain_5D_Prior', 'Rain_7D_Prior', 'Rain_10D_Prior',
+    'Rain3D_x_Slope', 'Rain5D_x_Slope', 'Rain7D_x_Slope', 'Rain10D_x_Slope'
 ]
 
 # Baseline medians derived from the training dataset to fill unexpected missing features safely
@@ -18,8 +18,8 @@ TRAINING_MEDIANS = {
     'Road_Zone': 3, 'CHIRPS_Day_1': 0, 'CHIRPS_Day_2': 0, 'CHIRPS_Day_3': 0,
     'CHIRPS_Day_4': 0, 'CHIRPS_Day_5': 0, 'CHIRPS_Day_6': 0, 'CHIRPS_Day_7': 0,
     'CHIRPS_Day_8': 0, 'CHIRPS_Day_9': 0, 'CHIRPS_Day_10': 0,
-    'Rain_3D_Prior': 0, 'Rain_5D_Prior': 0, 'Rain_7D_Prior': 0,
-    'Rain3D_x_Slope': 0, 'Rain5D_x_Slope': 0, 'Rain7D_x_Slope': 0
+    'Rain_3D_Prior': 0, 'Rain_5D_Prior': 0, 'Rain_7D_Prior': 0, 'Rain_10D_Prior': 0,
+    'Rain3D_x_Slope': 0, 'Rain5D_x_Slope': 0, 'Rain7D_x_Slope': 0, 'Rain10D_x_Slope': 0
 }
 
 def predict_landslide_batch(base_grid_data, model, scaler=None):
@@ -39,22 +39,25 @@ def predict_landslide_batch(base_grid_data, model, scaler=None):
     # 2.1 คำนวณฝนสะสมก่อนหน้า (คำนวณเหมือน test.ipynb ของผู้ใช้: เริ่มนับจาก Day 1)
     df.fillna(0, inplace=True)
     
-    df['Rain_3D_Prior'] = df['CHIRPS_Day_2'] + df['CHIRPS_Day_3'] + df['CHIRPS_Day_4']
-    df['Rain_5D_Prior'] = df['Rain_3D_Prior'] + df['CHIRPS_Day_5'] + df['CHIRPS_Day_6']
-    df['Rain_7D_Prior'] = df['Rain_5D_Prior'] + df['CHIRPS_Day_7'] + df['CHIRPS_Day_8']
+    # 2.2 Interaction Terms (การคูณไขว้เพื่อประเมินความลาดชันกับน้ำ)
+    df['Rain_3D_Prior'] = df['CHIRPS_Day_1'] + df['CHIRPS_Day_2'] + df['CHIRPS_Day_3']
+    df['Rain_5D_Prior'] = df['Rain_3D_Prior'] + df['CHIRPS_Day_4'] + df['CHIRPS_Day_5']
+    df['Rain_7D_Prior'] = df['Rain_5D_Prior'] + df['CHIRPS_Day_6'] + df['CHIRPS_Day_7']
+    df['Rain_10D_Prior'] = df['Rain_7D_Prior'] + df['CHIRPS_Day_8'] + df['CHIRPS_Day_9'] + df['CHIRPS_Day_10']
     
     # 2.2 Interaction Terms (การคูณไขว้เพื่อประเมินความลาดชันกับน้ำ)
     df['Rain3D_x_Slope'] = df['Rain_3D_Prior'] * df['Slope']
     df['Rain5D_x_Slope'] = df['Rain_5D_Prior'] * df['Slope']
     df['Rain7D_x_Slope'] = df['Rain_7D_Prior'] * df['Slope']
+    df['Rain10D_x_Slope'] = df['Rain_10D_Prior'] * df['Slope']
     
     # 2.3 Categorical/Routing variables หรืองานเชื่อมโยงข้อมูล
     # (สมมติถ้าใน base_grid มีคำว่า 'Distance_to_Road' ให้แปลงเป็น Road_Zone ระยะทาง เช่น โซน 1 < 1KM)
     if 'Road_Zone' not in df.columns:
         if 'Distance_to_Road' in df.columns:
-            # ใช้ Logic จริงจากโมเดล
+            # ใช้ Vectorization แทน lambda เพื่อเร่งความเร็ว 110k แถว
             df['Distance_to_Road'] = df['Distance_to_Road'].fillna(5000)
-            df['Distance_to_Road'] = df['Distance_to_Road'].apply(lambda x: x if x >= 0 else 0)
+            df['Distance_to_Road'] = df['Distance_to_Road'].clip(lower=0)
             df['Road_Zone'] = pd.cut(df['Distance_to_Road'], bins=[-1, 50, 100, 200, 500, np.inf], labels=[1, 2, 3, 4, 5]).astype(float)
         else:
             df['Road_Zone'] = 1
@@ -106,6 +109,7 @@ def predict_landslide_batch(base_grid_data, model, scaler=None):
     rain_3d_vals = df['Rain_3D_Prior'].values
     rain_5d_vals = df['Rain_5D_Prior'].values
     rain_7d_vals = df['Rain_7D_Prior'].values
+    rain_10d_vals = df['Rain_10D_Prior'].values
     
     for i, cell_record in enumerate(base_grid_data):
         cell_record['risk'] = str(preds_risk[i])
@@ -114,6 +118,7 @@ def predict_landslide_batch(base_grid_data, model, scaler=None):
         cell_record['properties']['Rain_3D (mm)'] = float(rain_3d_vals[i])
         cell_record['properties']['Rain_5D (mm)'] = float(rain_5d_vals[i])
         cell_record['properties']['Rain_7D (mm)'] = float(rain_7d_vals[i])
+        cell_record['properties']['Rain_10D (mm)'] = float(rain_10d_vals[i])
         
-    print(f"✅ [Modifier Data] Inference Complete: Translated Predictions back to {len(base_grid_data)} JSON items.")
+    print(f"[Modifier Data] Inference Complete: Translated Predictions back to {len(base_grid_data)} JSON items.")
     return base_grid_data

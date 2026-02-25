@@ -146,7 +146,10 @@ def get_rainfall(lat: float = 18.8, lon: float = 100.78, hours: int = 24):
 # ── Manual Predict Now ──
 @app.post("/api/predict_now")
 def predict_now(db: Session = Depends(get_db), current_user: Officer = Depends(get_current_user)):
-    cells = db.query(GridCell).all()
+    # For performance, avoid instantiating 117k SQLAlchemy objects. Query specific columns instead.
+    from sqlalchemy.orm import load_only
+    cells = db.query(GridCell).options(load_only(GridCell.id, GridCell.polygon, GridCell.properties, GridCell.risk)).all()
+    
     if not cells:
         return {"error": "No grid data in database. Run extraction first."}
     
@@ -172,13 +175,40 @@ def predict_now(db: Session = Depends(get_db), current_user: Officer = Depends(g
     
     # Save back to Postgres DB
     print("Saving predictions to database...")
+    update_mappings = []
+    import json
     for i, row in enumerate(results):
-        cells[i].risk = row.get('risk', 'Low')
-        cells[i].prediction_probability = row.get('probability', 0)
-        cells[i].properties = row.get('properties', {})
+        update_mappings.append({
+            "id": cells[i].id,
+            "risk": row.get('risk', 'Low'),
+            "prediction_probability": row.get('probability', 0),
+            "properties": json.dumps(row.get('properties', {}))
+        })
+        
+    # Use raw SQL executemany for ultimate performance to bypass ORM overhead
+    print("Executing high-speed raw SQL update...")
+    conn = db.connection()
     
-    db.commit()
-    
+    # We will just do a standard raw execute in chunks of 5000 to be safe
+    chunk_size = 5000
+    for i in range(0, len(update_mappings), chunk_size):
+        chunk = update_mappings[i:i + chunk_size]
+        
+        # Raw SQLAlchemy text execution
+        from sqlalchemy import text
+        stmt = text("""
+            UPDATE grid_data 
+            SET properties = :properties, 
+                risk = :risk, 
+                prediction_probability = :prediction_probability 
+            WHERE id = :id
+        """)
+        
+        # Execute the chunk
+        conn.execute(stmt, chunk)
+        db.commit()
+        print(f"Saved chunk {i//chunk_size + 1}/{(len(update_mappings) + chunk_size - 1)//chunk_size}")
+        
     # Calculate Summary
     rainfall_sample = results[0]['properties'].get('CHIRPS_Day_1', 0) if results else 0
     summary = {
@@ -198,16 +228,23 @@ def predict_now(db: Session = Depends(get_db), current_user: Officer = Depends(g
 
 @app.get("/api/predicted_data")
 def get_predicted_data(db: Session = Depends(get_db)):
-    cells = db.query(GridCell).all()
-    result = []
-    for c in cells:
-        result.append({
-            "polygon": c.polygon,
-            "properties": c.properties,
-            "risk": c.risk,
-            "probability": c.prediction_probability
-        })
-    return JSONResponse(content=result)
+    from sqlalchemy import text
+    conn = db.connection()
+    # Use raw SQL to completely bypass ORM overhead for 117k records (huge performance boost)
+    stmt = text("SELECT polygon, properties, risk, prediction_probability FROM grid_data")
+    result = conn.execute(stmt).fetchall()
+    
+    # Format the raw tuples into a list of dicts for JSON serialization
+    formatted_result = [
+        {
+            "polygon": row[0],
+            "properties": row[1],
+            "risk": row[2],
+            "probability": float(row[3]) if row[3] is not None else 0.0
+        }
+        for row in result
+    ]
+    return JSONResponse(content=formatted_result)
 
 # ── What-If Simulation (uses cached grid data, no GEE call) ──
 class WhatIfRequest(BaseModel):

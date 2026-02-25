@@ -7,7 +7,7 @@ import numpy as np
 import os
 
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-MODEL_PATH = os.path.join(MODEL_DIR, "best_model_Random_Forest_Normalized.pkl")
+MODEL_PATH = os.path.join(MODEL_DIR, "best_ml_model.pkl")
 SCALER_PATH = os.path.join(MODEL_DIR, "landslide_scaler.pkl")
 
 _model = None
@@ -39,11 +39,18 @@ def predict_risk(features: dict) -> dict:
     if _model is None:
         load_model()
     
-    # Feature order expected by the model
-    feature_order = ['Elevation', 'Slope', 'Aspect', 'TWI', 'MODIS_LC',
-                     'Soil_Type', 'NDVI', 'NDWI', 'Distance_to_Road', 'Rainfall']
+    # Feature order expected by the model (27 features)
+    feature_order = [
+         'CHIRPS_Day_1', 'CHIRPS_Day_2', 'CHIRPS_Day_3', 'CHIRPS_Day_4', 'CHIRPS_Day_5',
+         'CHIRPS_Day_6', 'CHIRPS_Day_7', 'CHIRPS_Day_8', 'CHIRPS_Day_9', 'CHIRPS_Day_10',
+         'Elevation_Extracted', 'Slope_Extracted', 'Aspect_Extracted',
+         'MODIS_LC', 'NDVI', 'NDWI', 'TWI', 'Soil_Type',
+         'Road_Zone',
+         'Rain_3D_Prior', 'Rain_5D_Prior', 'Rain_7D_Prior', 'Rain_10D_Prior',
+         'Rain3D_x_Slope', 'Rain5D_x_Slope', 'Rain7D_x_Slope', 'Rain10D_x_Slope'
+    ]
     
-    values = [features.get(f, 0) or 0 for f in feature_order]
+    values = [features.get(f, 0) for f in feature_order]
     X = np.array([values])
     
     # If model is loaded, use it
