@@ -18,27 +18,41 @@
 
 ---
 
-## 🚀 วิธีการติดตั้งและรันระบบ (How to Run)
+## 🚀 วิธีการติดตั้งและรันระบบแบบ Local (How to Run on Localhost)
 
-### 1. การเตรียม Backend (FastAPI + Python)
+### 1. การตั้งค่าไฟล์ `.env` สำหรับ Backend
+ก่อนที่จะเริ่มรันระบบ คุณต้องสร้างไฟล์ `.env` ไว้ในโฟลเดอร์ `backend/` โดยใส่ค่าดังต่อไปนี้:
+```env
+GEE_PROJECT_ID=<YOUR_GEE_PROJECT_ID>
+DATABASE_URL=<YOUR_DATABASE_URL>
+```
+*(ค่า `GEE_PROJECT_ID` ได้มาจาก Google Cloud Project ที่ผูกกับ Google Earth Engine ส่วน `DATABASE_URL` เป็น Connection String ของฐานข้อมูล (เช่น Supabase))*
+
+### 2. การเตรียม Backend (FastAPI + Python)
 เปิด Terminal และรันคำสั่งต่อไปนี้:
 
 ```bash
-# เข้าสู่โฟลเดอร์โปรเจค
+# เข้าสู่โฟลเดอร์ backend
 cd backend
 
-# 1. สร้าง Virtual Environment (ทำครั้งแรกครั้งเดียวในโฟลเดอร์หลักของโปรเจค)
+# 1. สร้าง Virtual Environment (ทำครั้งแรกครั้งเดียว)
 python -m venv venv
 
 # 2. เปิดใช้งาน Virtual Environment
-# Windows: ..\venv\Scripts\activate
-# Mac/Linux: source ../venv/bin/activate
+# สำหรับ Windows (Command Prompt - CMD):
+venv\Scripts\activate.bat
+# สำหรับ Windows (PowerShell):
+.\venv\Scripts\Activate.ps1
+# สำหรับ Mac/Linux:
+source venv/bin/activate
 
-# 3. ติดตั้ง Dependencies แพลตฟอร์มและไลบรารีที่จำเป็น (ทำครั้งแรกครังเดียว)
+# 3. ติดตั้ง Dependencies แพลตฟอร์มและไลบรารีที่จำเป็น
 pip install -r requirements.txt
 
-# 4. รันเซิฟเวอร์ Uvicorn
-..\venv\Scripts\uvicorn main:app --host 0.0.0.0 --port 8000
+# 4. รันเซิฟเวอร์ Uvicorn (หลังจากเปิดใช้งาน venv สำเร็จแล้ว)
+uvicorn main:app --host 0.0.0.0 --port 8000
+
+# (หมายเหตุ: หากไม่ได้เปิดเข้า venv สามารถรันเรียก path ตรงๆ ใน Windows ได้ด้วย: .\venv\Scripts\uvicorn.exe main:app --host 0.0.0.0 --port 8000)
 ```
 *💡 Backend จะรันอยู่ที่ `http://localhost:8000`*
 
