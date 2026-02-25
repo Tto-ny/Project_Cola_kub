@@ -1,10 +1,12 @@
-from fastapi import FastAPI, BackgroundTasks, Query, Depends
+from fastapi import FastAPI, BackgroundTasks, Query, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from database import get_db, GridCell, SessionLocal
+from database import get_db, GridCell, SessionLocal, Officer
+from auth import verify_password, create_access_token, decode_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from services.gee_extractor import extract_gee_data
 from services.spatial_search import search_location, get_all_districts
 from services.predictor import predict_risk, predict_batch, load_model
@@ -12,7 +14,7 @@ from services.rainfall import fetch_rainfall
 from services.chatbot import chat as chatbot_answer
 from services.rainfall_pipeline import apply_spatial_interpolation
 import json, os, math, sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Add root dir to path so we can import modifier_data
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,6 +36,45 @@ alert_logs = []
 @app.on_event("startup")
 def on_startup():
     load_model()
+
+# ── Authentication ──
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    payload = decode_access_token(token)
+    if payload is None:
+        raise credentials_exception
+    username: str = payload.get("sub")
+    if username is None:
+        raise credentials_exception
+    user = db.query(Officer).filter(Officer.username == username).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
+@app.post("/api/token")
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(Officer).filter(Officer.username == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username, "role": user.role}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/users/me")
+def read_users_me(current_user: Officer = Depends(get_current_user)):
+    return {"username": current_user.username, "role": current_user.role}
 
 # ── GEE Extraction ──
 def run_extraction():
@@ -63,7 +104,7 @@ def read_root():
     return {"message": "Landslide Early Warning API"}
 
 @app.post("/api/extract_grid")
-async def trigger_extraction(bg: BackgroundTasks):
+async def trigger_extraction(bg: BackgroundTasks, current_user: Officer = Depends(get_current_user)):
     bg.add_task(run_extraction)
     return {"status": "started", "message": "GEE extraction started."}
 
@@ -104,7 +145,7 @@ def get_rainfall(lat: float = 18.8, lon: float = 100.78, hours: int = 24):
 
 # ── Manual Predict Now ──
 @app.post("/api/predict_now")
-def predict_now(db: Session = Depends(get_db)):
+def predict_now(db: Session = Depends(get_db), current_user: Officer = Depends(get_current_user)):
     cells = db.query(GridCell).all()
     if not cells:
         return {"error": "No grid data in database. Run extraction first."}
@@ -224,8 +265,8 @@ class ChatRequest(BaseModel):
     message: str
 
 @app.post("/api/chat")
-def chat_endpoint(req: ChatRequest):
-    answer = chatbot_answer(req.message)
+def chat_endpoint(req: ChatRequest, db: Session = Depends(get_db)):
+    answer = chatbot_answer(req.message, db)
     return {"answer": answer}
 
 # ── Scheduler ──

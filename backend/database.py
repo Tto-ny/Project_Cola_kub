@@ -29,6 +29,14 @@ class GridCell(Base):
     risk = Column(String(50))     
     prediction_probability = Column(Float, nullable=True) 
 
+class Officer(Base):
+    __tablename__ = "officers"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    username = Column(String(50), unique=True, index=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(50), default="officer")
+
 # Dependency to get DB session in FastAPI endpoints
 def get_db():
     db = SessionLocal()

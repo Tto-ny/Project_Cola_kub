@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useContext } from 'react';
 import Map from 'react-map-gl/maplibre';
 import DeckGL from '@deck.gl/react';
 import { PolygonLayer, ScatterplotLayer } from '@deck.gl/layers';
@@ -8,7 +8,10 @@ const API = 'http://localhost:8000';
 const INITIAL_VIEW = { longitude: 100.85, latitude: 18.8, zoom: 9, pitch: 0, bearing: 0 };
 const RISK_COLORS = { High: [255, 40, 40, 210], Medium: [255, 165, 0, 200], Low: [100, 120, 130, 80] };
 
+import { AuthContext } from '../contexts/AuthContext';
+
 export default function MapDashboard() {
+    const { token, logout, user } = useContext(AuthContext);
     const [gridData, setGridData] = useState([]);
     const [layers, setLayers] = useState([]);
     const [viewState, setViewState] = useState(INITIAL_VIEW);
@@ -103,7 +106,10 @@ export default function MapDashboard() {
     const handleExtract = async () => {
         setLoading(true); setStatus('Starting...'); addLog('POST /api/extract_grid');
         try {
-            await fetch(`${API}/api/extract_grid`, { method: 'POST' });
+            await fetch(`${API}/api/extract_grid`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             const fin = await pollStatus();
             if (fin === 'done') {
                 const grid = await (await fetch(`${API}/api/grid_data`)).json();
@@ -116,7 +122,10 @@ export default function MapDashboard() {
     const handlePredictNow = async () => {
         setPredicting(true); setStatus('Fetching rainfall & predicting...'); addLog('POST /api/predict_now');
         try {
-            const data = await (await fetch(`${API}/api/predict_now`, { method: 'POST' })).json();
+            const data = await (await fetch(`${API}/api/predict_now`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            })).json();
             if (data.summary) {
                 addLog(`Done. Rain=${data.summary.rainfall_mm}mm High=${data.summary.high}`);
                 setStatus(`Predicted. Rain=${data.summary.rainfall_mm}mm`);
@@ -256,9 +265,14 @@ export default function MapDashboard() {
 
             <div style={S.sidebar}>
                 {/* Header */}
-                <div style={{ padding: '14px 20px 10px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>🛡️ Landslide Early Warning</h1>
-                    <p style={{ margin: '2px 0 0', fontSize: 10, color: '#6b7280' }}>Nan Province Dashboard</p>
+                <div style={{ padding: '14px 20px 10px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>🛡️ Landslide Early Warning</h1>
+                        <p style={{ margin: '2px 0 0', fontSize: 10, color: '#6b7280' }}>Nan Province Dashboard {user ? `(Officer: ${user.username})` : ''}</p>
+                    </div>
+                    <button onClick={logout} style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 4, padding: '4px 8px', fontSize: 10, cursor: 'pointer', transition: 'all 0.2s' }}>
+                        Logout
+                    </button>
                 </div>
 
                 {/* Tabs */}

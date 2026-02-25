@@ -1,14 +1,10 @@
-"""
-Landslide RAG Chatbot - retrieves relevant grid data and answers questions
-about landslide risk in Nan Province using rule-based NLP.
-"""
 import json
 import os
 import re
 import math
-
-DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "extracted_grid_data.json")
-PRED_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "predicted_grid_data.json")
+from sqlalchemy.orm import Session
+from sqlalchemy import text, func
+from database import GridCell
 
 # District lookup for spatial queries
 DISTRICTS = {
@@ -29,55 +25,48 @@ DISTRICTS = {
     "เฉลิมพระเกียรติ": {"en": "Chaloem Phra Kiat", "center": [101.15, 19.50]},
 }
 
-def _load_grid():
-    # Prefer predicted data, fallback to raw extraction
-    for path in [PRED_PATH, DATA_PATH]:
-        if os.path.exists(path):
-            with open(path, 'r') as f:
-                return json.load(f)
-    return []
+def get_stats_from_db(db: Session, cx=None, cy=None, radius_deg=0.15):
+    """Fetch aggregated stats directly using PostgreSQL."""
+    if cx is not None and cy is not None:
+        # Distance filter condition
+        dist_filter = f"(POWER(longitude - {cx}, 2) + POWER(latitude - {cy}, 2)) < {radius_deg**2}"
+        where_clause = f"WHERE {dist_filter}"
+    else:
+        where_clause = ""
+        dist_filter = "1=1"
 
-def _cells_near(grid, lon, lat, radius_deg=0.15):
-    """Get cells within radius of a point."""
-    return [c for c in grid if _dist(c, lon, lat) < radius_deg]
-
-def _dist(cell, lon, lat):
-    poly = cell.get('polygon', [])
-    if not poly or len(poly) < 4:
-        return float('inf')
-    cx = sum(p[0] for p in poly[:4]) / 4
-    cy = sum(p[1] for p in poly[:4]) / 4
-    return math.sqrt((cx - lon)**2 + (cy - lat)**2)
-
-def _summary_stats(cells):
-    if not cells:
-        return {"total": 0, "high": 0, "medium": 0, "low": 0, "avg_slope": 0, "avg_elev": 0}
-    high = sum(1 for c in cells if c.get('risk') == 'High')
-    med = sum(1 for c in cells if c.get('risk') == 'Medium')
-    low = sum(1 for c in cells if c.get('risk') == 'Low')
-    slopes = [c['properties'].get('Slope', 0) or 0 for c in cells]
-    elevs = [c['properties'].get('Elevation', 0) or 0 for c in cells]
+    total = db.execute(text(f"SELECT COUNT(*) FROM grid_data {where_clause}")).scalar() or 0
+    if total == 0:
+        return {"total": 0, "high": 0, "medium": 0, "low": 0, "avg_slope": 0, "max_slope": 0, "avg_elev": 0}
+        
+    high = db.execute(text(f"SELECT COUNT(*) FROM grid_data WHERE risk = 'High' AND {dist_filter}")).scalar() or 0
+    medium = db.execute(text(f"SELECT COUNT(*) FROM grid_data WHERE risk = 'Medium' AND {dist_filter}")).scalar() or 0
+    low = db.execute(text(f"SELECT COUNT(*) FROM grid_data WHERE risk = 'Low' AND {dist_filter}")).scalar() or 0
+    
+    avg_slope = db.execute(text(f"SELECT AVG((properties->>'Slope')::float) FROM grid_data {where_clause}")).scalar() or 0
+    max_slope = db.execute(text(f"SELECT MAX((properties->>'Slope')::float) FROM grid_data {where_clause}")).scalar() or 0
+    avg_elev = db.execute(text(f"SELECT AVG((properties->>'Elevation')::float) FROM grid_data {where_clause}")).scalar() or 0
+    
     return {
-        "total": len(cells), "high": high, "medium": med, "low": low,
-        "avg_slope": round(sum(slopes) / len(slopes), 1) if slopes else 0,
-        "avg_elev": round(sum(elevs) / len(elevs), 0) if elevs else 0,
-        "max_slope": round(max(slopes), 1) if slopes else 0,
+        "total": total, "high": high, "medium": medium, "low": low,
+        "avg_slope": round(avg_slope, 1),
+        "max_slope": round(max_slope, 1),
+        "avg_elev": round(avg_elev, 0)
     }
 
-def chat(message: str) -> str:
+def chat(message: str, db: Session) -> str:
     """Process a chat message and return an answer."""
     msg = message.lower().strip()
-    grid = _load_grid()
     
-    if not grid:
+    total_count = db.query(GridCell).count()
+    if total_count == 0:
         return "ยังไม่มีข้อมูลในระบบครับ กรุณากดปุ่ม Extract GEE Features ก่อน แล้วค่อยถามใหม่นะครับ"
-    
-    total_stats = _summary_stats(grid)
     
     # ── Pattern matching ──
     
     # Overall summary
     if any(w in msg for w in ['สรุป', 'ภาพรวม', 'summary', 'overview', 'ทั้งหมด', 'รวม']):
+        total_stats = get_stats_from_db(db)
         return (
             f"📊 **สรุปภาพรวมจังหวัดน่าน**\n\n"
             f"• Grid cells ทั้งหมด: **{total_stats['total']:,}** cells\n"
@@ -90,20 +79,22 @@ def chat(message: str) -> str:
     
     # High risk areas
     if any(w in msg for w in ['เสี่ยงสูง', 'อันตราย', 'high risk', 'danger', 'พื้นที่เสี่ยง', 'จุดเสี่ยง']):
-        high_cells = [c for c in grid if c.get('risk') == 'High']
-        if not high_cells:
+        high_cells_count = db.execute(text("SELECT COUNT(*) FROM grid_data WHERE risk = 'High'")).scalar() or 0
+        if high_cells_count == 0:
             return "ตอนนี้ยังไม่พบพื้นที่เสี่ยงสูง (High Risk) ในข้อมูลปัจจุบันครับ"
         
         # Find which districts have highest concentration
         district_counts = {}
         for dname, dinfo in DISTRICTS.items():
-            nearby = _cells_near(high_cells, dinfo['center'][0], dinfo['center'][1], 0.15)
-            if nearby:
-                district_counts[dname] = len(nearby)
+            cx, cy = dinfo['center']
+            dist_filter = f"(POWER(longitude - {cx}, 2) + POWER(latitude - {cy}, 2)) < {0.15**2}"
+            count = db.execute(text(f"SELECT COUNT(*) FROM grid_data WHERE risk = 'High' AND {dist_filter}")).scalar() or 0
+            if count > 0:
+                district_counts[dname] = count
         
         top_districts = sorted(district_counts.items(), key=lambda x: -x[1])[:5]
         
-        result = f"🔴 **พื้นที่เสี่ยงสูง (High Risk)**\n\nมีทั้งหมด **{len(high_cells):,}** cells\n\n"
+        result = f"🔴 **พื้นที่เสี่ยงสูง (High Risk)**\n\nมีทั้งหมด **{high_cells_count:,}** cells\n\n"
         if top_districts:
             result += "**อำเภอที่มีจุดเสี่ยงมากที่สุด:**\n"
             for dname, count in top_districts:
@@ -120,8 +111,8 @@ def chat(message: str) -> str:
     
     if found_district:
         dname, dinfo = found_district
-        nearby = _cells_near(grid, dinfo['center'][0], dinfo['center'][1], 0.15)
-        stats = _summary_stats(nearby)
+        cx, cy = dinfo['center']
+        stats = get_stats_from_db(db, cx, cy, 0.15)
         
         return (
             f"📍 **อำเภอ{dname} ({dinfo['en']})**\n\n"
@@ -134,20 +125,20 @@ def chat(message: str) -> str:
     
     # Slope / terrain questions
     if any(w in msg for w in ['slope', 'ความชัน', 'ลาดเอียง']):
-        steep = [c for c in grid if (c['properties'].get('Slope', 0) or 0) > 30]
+        total_stats = get_stats_from_db(db)
+        steep_count = db.execute(text("SELECT COUNT(*) FROM grid_data WHERE (properties->>'Slope')::float > 30")).scalar() or 0
         return (
             f"⛰️ **ข้อมูลความชัน (Slope)**\n\n"
             f"• Slope เฉลี่ย: **{total_stats['avg_slope']}°**\n"
             f"• Slope สูงสุด: **{total_stats['max_slope']}°**\n"
-            f"• จุดที่ชันเกิน 30°: **{len(steep):,}** cells\n\n"
+            f"• จุดที่ชันเกิน 30°: **{steep_count:,}** cells\n\n"
             f"พื้นที่ที่มี Slope สูงกว่า 25° ถือว่ามีความเสี่ยงดินถล่มสูงครับ"
         )
     
     # NDVI / vegetation
     if any(w in msg for w in ['ndvi', 'พืช', 'vegetation', 'ป่า', 'forest']):
-        ndvi_vals = [c['properties'].get('NDVI', 0) or 0 for c in grid]
-        avg_ndvi = sum(ndvi_vals) / len(ndvi_vals) if ndvi_vals else 0
-        low_ndvi = sum(1 for v in ndvi_vals if v < 0.2)
+        avg_ndvi = db.execute(text("SELECT AVG((properties->>'NDVI')::float) FROM grid_data")).scalar() or 0
+        low_ndvi = db.execute(text("SELECT COUNT(*) FROM grid_data WHERE (properties->>'NDVI')::float < 0.2")).scalar() or 0
         return (
             f"🌿 **ข้อมูลพืชพรรณ (NDVI)**\n\n"
             f"• NDVI เฉลี่ย: **{avg_ndvi:.3f}**\n"
@@ -177,6 +168,7 @@ def chat(message: str) -> str:
         )
     
     # Default
+    total_stats = get_stats_from_db(db)
     return (
         f"ขอบคุณสำหรับคำถามครับ 🙏\n\n"
         f"ตอนนี้ระบบมีข้อมูล **{total_stats['total']:,}** cells | "
