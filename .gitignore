@@ -15,6 +15,7 @@ env/
 # Large data (optional)
 # *.csv
 # *.pkl
+Landslide_Final_Cleaned_V2.csv
 
 # IDEs
 .vscode/
