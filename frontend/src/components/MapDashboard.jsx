@@ -3,10 +3,78 @@ import Map from 'react-map-gl/maplibre';
 import DeckGL from '@deck.gl/react';
 import { PolygonLayer, ScatterplotLayer } from '@deck.gl/layers';
 
-const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+const MAP_STYLES = {
+    dark: { label: '🌑 Dark', url: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json' },
+    light: { label: '☀️ Light', url: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json' },
+    streets: { label: '🗺️ Streets', url: 'https://tiles.openfreemap.org/styles/liberty' },
+    terrain: {
+        label: '🏔️ Terrain', url: {
+            version: 8, name: 'OpenTopoMap',
+            sources: { 'otm': { type: 'raster', tiles: ['https://tile.opentopomap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenTopoMap contributors' } },
+            layers: [{ id: 'otm-tiles', type: 'raster', source: 'otm', minzoom: 0, maxzoom: 17 }]
+        }
+    },
+    satellite: {
+        label: '🛰️ Satellite', url: {
+            version: 8, name: 'Esri World Imagery',
+            sources: { 'esri': { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, attribution: '© Esri' } },
+            layers: [{ id: 'esri-tiles', type: 'raster', source: 'esri', minzoom: 0, maxzoom: 19 }]
+        }
+    },
+};
 const API = 'http://localhost:8000';
 const INITIAL_VIEW = { longitude: 100.85, latitude: 18.8, zoom: 9, pitch: 0, bearing: 0 };
 const RISK_COLORS = { High: [255, 40, 40, 210], Medium: [255, 165, 0, 200], Low: [100, 120, 130, 80] };
+
+// Tambon (sub-district) data for reverse geocoding
+const NAN_TAMBONS = [
+    { n: 'ในเวียง', a: 'Mueang Nan', c: [100.773, 18.783] }, { n: 'บ่อ', a: 'Mueang Nan', c: [100.75, 18.76] },
+    { n: 'ผาสิงห์', a: 'Mueang Nan', c: [100.80, 18.80] }, { n: 'ไชยสถาน', a: 'Mueang Nan', c: [100.78, 18.75] },
+    { n: 'ถืมตอง', a: 'Mueang Nan', c: [100.76, 18.77] }, { n: 'เรือง', a: 'Mueang Nan', c: [100.72, 18.82] },
+    { n: 'นาซาว', a: 'Mueang Nan', c: [100.70, 18.68] }, { n: 'ดู่ใต้', a: 'Mueang Nan', c: [100.83, 18.73] },
+    { n: 'กองควาย', a: 'Mueang Nan', c: [100.85, 18.81] }, { n: 'สวก', a: 'Mueang Nan', c: [100.88, 18.87] },
+    { n: 'หนองแดง', a: 'Mae Charim', c: [100.83, 18.58] }, { n: 'หมอเมือง', a: 'Mae Charim', c: [100.87, 18.53] },
+    { n: 'น้ำพาง', a: 'Mae Charim', c: [100.90, 18.48] }, { n: 'แม่จริม', a: 'Mae Charim', c: [100.85, 18.55] },
+    { n: 'บ้านฟ้า', a: 'Ban Luang', c: [100.61, 18.92] }, { n: 'ป่าคาหลวง', a: 'Ban Luang', c: [100.58, 18.88] },
+    { n: 'สวด', a: 'Ban Luang', c: [100.63, 18.95] }, { n: 'บ้านพี้', a: 'Ban Luang', c: [100.56, 18.85] },
+    { n: 'นาน้อย', a: 'Na Noi', c: [100.72, 18.38] }, { n: 'เชียงของ', a: 'Na Noi', c: [100.68, 18.30] },
+    { n: 'ศรีษะเกษ', a: 'Na Noi', c: [100.75, 18.42] }, { n: 'สถาน', a: 'Na Noi', c: [100.78, 18.35] },
+    { n: 'สันทะ', a: 'Na Noi', c: [100.65, 18.25] }, { n: 'บัวใหญ่', a: 'Na Noi', c: [100.75, 18.32] },
+    { n: 'น้ำตก', a: 'Na Noi', c: [100.80, 18.28] },
+    { n: 'ปัว', a: 'Pua', c: [101.08, 19.17] }, { n: 'แงง', a: 'Pua', c: [101.05, 19.20] },
+    { n: 'สกาด', a: 'Pua', c: [101.12, 19.22] }, { n: 'ศิลาเพชร', a: 'Pua', c: [101.00, 19.15] },
+    { n: 'ศิลาแลง', a: 'Pua', c: [101.15, 19.25] }, { n: 'อวน', a: 'Pua', c: [101.02, 19.10] },
+    { n: 'ไชยวัฒนา', a: 'Pua', c: [101.10, 19.12] }, { n: 'เจดีย์ชัย', a: 'Pua', c: [101.06, 19.05] },
+    { n: 'ภูคา', a: 'Pua', c: [101.18, 19.30] }, { n: 'สวนขวัญ', a: 'Pua', c: [101.03, 19.18] },
+    { n: 'วรนคร', a: 'Pua', c: [101.07, 19.15] },
+    { n: 'ริม', a: 'Tha Wang Pha', c: [100.75, 19.12] }, { n: 'ป่าคา', a: 'Tha Wang Pha', c: [100.72, 19.08] },
+    { n: 'ผาตอ', a: 'Tha Wang Pha', c: [100.80, 19.18] }, { n: 'ยม', a: 'Tha Wang Pha', c: [100.68, 19.05] },
+    { n: 'ตาลี่', a: 'Tha Wang Pha', c: [100.78, 19.15] }, { n: 'ศรีภูมิ', a: 'Tha Wang Pha', c: [100.70, 19.10] },
+    { n: 'จอมพระ', a: 'Tha Wang Pha', c: [100.73, 19.20] }, { n: 'แสนทอง', a: 'Tha Wang Pha', c: [100.82, 19.22] },
+    { n: 'กลางเวียง', a: 'Wiang Sa', c: [100.70, 18.55] }, { n: 'ขึ่ง', a: 'Wiang Sa', c: [100.65, 18.50] },
+    { n: 'ไหล่น่าน', a: 'Wiang Sa', c: [100.72, 18.62] }, { n: 'ตาลชุม', a: 'Wiang Sa', c: [100.60, 18.45] },
+    { n: 'นาเหลือง', a: 'Wiang Sa', c: [100.75, 18.58] }, { n: 'ส้าน', a: 'Wiang Sa', c: [100.58, 18.40] },
+    { n: 'น้ำมวบ', a: 'Wiang Sa', c: [100.82, 18.65] }, { n: 'น้ำปั้ว', a: 'Wiang Sa', c: [100.78, 18.68] },
+    { n: 'ยาบหัวนา', a: 'Wiang Sa', c: [100.68, 18.52] }, { n: 'ปงสนุก', a: 'Wiang Sa', c: [100.73, 18.48] },
+    { n: 'ทุ่งช้าง', a: 'Thung Chang', c: [101.05, 19.40] }, { n: 'งอบ', a: 'Thung Chang', c: [101.00, 19.38] },
+    { n: 'และ', a: 'Thung Chang', c: [101.10, 19.45] }, { n: 'ปอน', a: 'Thung Chang', c: [101.08, 19.35] },
+    { n: 'เชียงกลาง', a: 'Chiang Klang', c: [100.87, 19.28] }, { n: 'เปือ', a: 'Chiang Klang', c: [100.82, 19.25] },
+    { n: 'เชียงคาน', a: 'Chiang Klang', c: [100.90, 19.32] }, { n: 'พระธาตุ', a: 'Chiang Klang', c: [100.85, 19.30] },
+    { n: 'พญาแก้ว', a: 'Chiang Klang', c: [100.93, 19.35] },
+    { n: 'นาทะนุง', a: 'Na Muen', c: [100.65, 18.22] }, { n: 'บ่อแก้ว', a: 'Na Muen', c: [100.60, 18.18] },
+    { n: 'เมืองลี', a: 'Na Muen', c: [100.70, 18.25] }, { n: 'ปิงหลวง', a: 'Na Muen', c: [100.63, 18.15] },
+    { n: 'ดู่พงษ์', a: 'Santi Suk', c: [100.85, 18.92] }, { n: 'ป่าแลวหลวง', a: 'Santi Suk', c: [100.88, 18.88] },
+    { n: 'พงษ์', a: 'Santi Suk', c: [100.82, 18.95] },
+    { n: 'บ่อเกลือเหนือ', a: 'Bo Kluea', c: [101.15, 19.30] }, { n: 'บ่อเกลือใต้', a: 'Bo Kluea', c: [101.12, 19.22] },
+    { n: 'ภูฟ้า', a: 'Bo Kluea', c: [101.20, 19.35] }, { n: 'ดงพญา', a: 'Bo Kluea', c: [101.18, 19.18] },
+    { n: 'นาไร่หลวง', a: 'Song Khwae', c: [100.98, 19.38] }, { n: 'ชนแดน', a: 'Song Khwae', c: [100.95, 19.32] },
+    { n: 'ยอด', a: 'Song Khwae', c: [101.02, 19.42] },
+    { n: 'ม่วงตึ๊ด', a: 'Phu Phiang', c: [100.80, 18.72] }, { n: 'นาปัง', a: 'Phu Phiang', c: [100.77, 18.68] },
+    { n: 'น้ำแก่น', a: 'Phu Phiang', c: [100.83, 18.75] }, { n: 'ท่าน้าว', a: 'Phu Phiang', c: [100.85, 18.78] },
+    { n: 'เมืองจัง', a: 'Phu Phiang', c: [100.75, 18.65] }, { n: 'ฝายแก้ว', a: 'Phu Phiang', c: [100.88, 18.82] },
+    { n: 'สองแคว', a: 'Phu Phiang', c: [100.78, 18.70] },
+    { n: 'ห้วยโก๋น', a: 'Chaloem Phra Kiat', c: [101.15, 19.52] }, { n: 'ขุนน่าน', a: 'Chaloem Phra Kiat', c: [101.18, 19.48] },
+];
 
 import { AuthContext } from '../contexts/AuthContext';
 
@@ -20,14 +88,35 @@ export default function MapDashboard() {
     const [logs, setLogs] = useState([]);
     const [filters, setFilters] = useState({ High: true, Medium: true, Low: true });
     const [tab, setTab] = useState('map');
+    const [mapStyle, setMapStyle] = useState('dark');
+    const [styleMenuOpen, setStyleMenuOpen] = useState(false);
     const [alerts, setAlerts] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState([]);
     const [districts, setDistricts] = useState([]);
+
+    // Other states...
     const [whatIfMode, setWhatIfMode] = useState(false);
     const [whatIfRainDays, setWhatIfRainDays] = useState(Array(10).fill(0));
     const [whatIfResult, setWhatIfResult] = useState(null);
     const [whatIfPin, setWhatIfPin] = useState(null);
     const [predicting, setPredicting] = useState(false);
+
+    // History states
+    const [historyAlerts, setHistoryAlerts] = useState([]);
+    const [historyStart, setHistoryStart] = useState('');
+    const [historyEnd, setHistoryEnd] = useState('');
+    const [historyLoading, setHistoryLoading] = useState(false);
+
+    // Mapped Alerts based on predictions — all risk levels, top 100 by probability
+    const MAPPED_ALERTS = React.useMemo(() => {
+        let alerts = [...gridData];
+        // Sort from highest probability to lowest
+        alerts.sort((a, b) => (b.probability || 0) - (a.probability || 0));
+        // Top 100 only
+        return alerts.slice(0, 100);
+    }, [gridData]);
+    const [selectedAlert, setSelectedAlert] = useState(null);
     // Chat state
     const [chatMessages, setChatMessages] = useState([
         { role: 'bot', text: 'สวัสดีครับ! ผมเป็นระบบ AI วิเคราะห์ความเสี่ยงดินถล่มจังหวัดน่าน\n\nลองถาม: **สรุป**, **พื้นที่เสี่ยงสูง**, **อ.ปัว**, **slope**, **ndvi**, **ฝน** หรือ **help**' }
@@ -156,17 +245,64 @@ export default function MapDashboard() {
         finally { setPredicting(false); }
     };
 
+    // Auto-search logic
+    useEffect(() => {
+        const timeoutId = setTimeout(async () => {
+            if (searchQuery.trim().length > 0) {
+                try {
+                    const res = await (await fetch(`${API}/api/search?q=${encodeURIComponent(searchQuery)}`)).json();
+                    setSearchResults(Array.isArray(res) ? res : []);
+                } catch {
+                    setSearchResults([]);
+                }
+            } else {
+                setSearchResults([]);
+            }
+        }, 300);
+        return () => clearTimeout(timeoutId);
+    }, [searchQuery]);
+
     const handleSearch = async () => {
         if (!searchQuery.trim()) return;
         const results = await (await fetch(`${API}/api/search?q=${encodeURIComponent(searchQuery)}`)).json();
-        if (results.length > 0) {
+        if (results && results.length > 0) {
             const d = results[0];
             setViewState(v => ({ ...v, longitude: d.center[0], latitude: d.center[1], zoom: 11, transitionDuration: 800 }));
             addLog(`Zoomed to ${d.name_en}`);
+            setSearchResults([]);
         } else addLog(`No results`);
     };
 
+    const handleSelectSearch = (d) => {
+        setViewState(v => ({ ...v, longitude: d.center[0], latitude: d.center[1], zoom: 13, transitionDuration: 1000 }));
+        addLog(`Zoomed to ${d.name_en}`);
+        setSearchQuery(d.name_th);
+        setSearchResults([]);
+    };
+
     const fetchAlerts = async () => { try { setAlerts(await (await fetch(`${API}/api/alerts`)).json()); } catch { } };
+
+    const fetchHistory = async () => {
+        setHistoryLoading(true);
+        try {
+            let url = `${API}/api/alert_history?`;
+            if (historyStart) url += `start_date=${historyStart}&`;
+            if (historyEnd) url += `end_date=${historyEnd}`;
+            const res = await fetch(url);
+            if (!res.ok) {
+                console.error("Backend returned error:", res.status);
+                setHistoryAlerts([]);
+                return;
+            }
+            const data = await res.json();
+            setHistoryAlerts(Array.isArray(data) ? data : []);
+        } catch (e) {
+            console.error("Failed to fetch history:", e);
+            setHistoryAlerts([]);
+        }
+        finally { setHistoryLoading(false); }
+    };
+
     const toggleFilter = (l) => setFilters(p => ({ ...p, [l]: !p[l] }));
 
     // Chat
@@ -260,8 +396,113 @@ export default function MapDashboard() {
                         style: { background: 'rgba(20,20,30,0.95)', color: '#eee', borderRadius: 8, padding: 10, border: '1px solid #444', backdropFilter: 'blur(4px)' }
                     };
                 }}>
-                <Map mapStyle={MAP_STYLE} />
+                <Map mapStyle={MAP_STYLES[mapStyle].url} />
             </DeckGL>
+
+            {/* ──── MAP STYLE SELECTOR ──── */}
+            <div style={{
+                position: 'absolute', bottom: 24, right: 24, zIndex: 20,
+                fontFamily: "'Inter','Segoe UI',sans-serif",
+            }}>
+                {/* Collapsed button */}
+                {!styleMenuOpen && (
+                    <button
+                        onClick={() => setStyleMenuOpen(true)}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '10px 16px', borderRadius: 12,
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            background: 'rgba(15,15,26,0.85)', backdropFilter: 'blur(12px)',
+                            color: '#e5e7eb', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                            transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(59,130,246,0.2)'; e.currentTarget.style.borderColor = 'rgba(59,130,246,0.4)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(15,15,26,0.85)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'; }}
+                    >
+                        🗺️ {MAP_STYLES[mapStyle].label.split(' ').slice(1).join(' ')}
+                    </button>
+                )}
+
+                {/* Expanded panel */}
+                {styleMenuOpen && (
+                    <div style={{
+                        background: 'rgba(15,15,26,0.92)', backdropFilter: 'blur(16px)',
+                        borderRadius: 16, padding: 16,
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                        minWidth: 280,
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: '#e5e7eb' }}>🗺️ Map Style</span>
+                            <button
+                                onClick={() => setStyleMenuOpen(false)}
+                                style={{
+                                    background: 'rgba(255,255,255,0.08)', border: 'none',
+                                    color: '#9ca3af', cursor: 'pointer', borderRadius: 6,
+                                    width: 28, height: 28, fontSize: 14, display: 'flex',
+                                    alignItems: 'center', justifyContent: 'center',
+                                    transition: 'all 0.2s',
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.2)'; e.currentTarget.style.color = '#ef4444'; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = '#9ca3af'; }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            {Object.entries(MAP_STYLES).map(([key, style]) => {
+                                const isActive = mapStyle === key;
+                                const colors = {
+                                    dark: ['#1a1a2e', '#16213e', '#0f3460'],
+                                    light: ['#f8f9fa', '#e9ecef', '#dee2e6'],
+                                    streets: ['#e8d5b7', '#b8d4e3', '#a8c686'],
+                                    terrain: ['#c8d6a0', '#a3b87c', '#8fae6b'],
+                                    satellite: ['#2d4a2d', '#3a5f3a', '#1a3a1a'],
+                                };
+                                const c = colors[key] || colors.dark;
+                                return (
+                                    <button
+                                        key={key}
+                                        onClick={() => { setMapStyle(key); setStyleMenuOpen(false); }}
+                                        style={{
+                                            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+                                            padding: 10, borderRadius: 12, cursor: 'pointer',
+                                            border: isActive ? '2px solid #3b82f6' : '2px solid rgba(255,255,255,0.08)',
+                                            background: isActive ? 'rgba(59,130,246,0.1)' : 'rgba(255,255,255,0.03)',
+                                            transition: 'all 0.2s',
+                                        }}
+                                        onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; } }}
+                                        onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; } }}
+                                    >
+                                        {/* Mini preview */}
+                                        <div style={{
+                                            width: '100%', height: 52, borderRadius: 8,
+                                            background: `linear-gradient(135deg, ${c[0]}, ${c[1]}, ${c[2]})`,
+                                            position: 'relative', overflow: 'hidden',
+                                            boxShadow: isActive ? '0 0 12px rgba(59,130,246,0.3)' : 'none',
+                                        }}>
+                                            {/* Decorative lines to mimic map features */}
+                                            <svg width="100%" height="100%" viewBox="0 0 100 52" style={{ position: 'absolute', opacity: 0.35 }}>
+                                                <path d="M10 35 Q30 15 50 25 T90 20" fill="none" stroke={key === 'light' ? '#666' : '#fff'} strokeWidth="1.5" />
+                                                <path d="M5 45 Q25 30 45 40 T95 35" fill="none" stroke={key === 'light' ? '#666' : '#fff'} strokeWidth="1" />
+                                                <circle cx="70" cy="15" r="3" fill={key === 'light' ? '#666' : '#fff'} opacity="0.5" />
+                                                <circle cx="30" cy="38" r="2" fill={key === 'light' ? '#666' : '#fff'} opacity="0.4" />
+                                            </svg>
+                                        </div>
+                                        <span style={{
+                                            fontSize: 11, fontWeight: isActive ? 700 : 500,
+                                            color: isActive ? '#60a5fa' : '#9ca3af',
+                                        }}>
+                                            {style.label}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+            </div>
 
             <div style={S.sidebar}>
                 {/* Header */}
@@ -277,8 +518,8 @@ export default function MapDashboard() {
 
                 {/* Tabs */}
                 <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    {[['map', '🗺️ Map'], ['whatif', '🎯 What-If'], ['alerts', '🔔 Alerts']].map(([k, l]) => (
-                        <button key={k} style={S.tab(tab === k)} onClick={() => { setTab(k); if (k === 'alerts') fetchAlerts(); }}>
+                    {[['map', '🗺️ Map'], ['whatif', '🎯 What-If'], ['alerts', '🔔 Alerts'], ['history', '📅 History']].map(([k, l]) => (
+                        <button key={k} style={S.tab(tab === k)} onClick={() => { setTab(k); if (k === 'alerts') fetchAlerts(); if (k === 'history') fetchHistory(); }}>
                             {l}
                         </button>
                     ))}
@@ -321,11 +562,45 @@ export default function MapDashboard() {
                             ))}
                         </div>
 
-                        <div style={S.label}>Search District</div>
-                        <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-                            <input style={{ ...S.input, flex: 1 }} placeholder="ค้นหาอำเภอ..." value={searchQuery}
+                        <div style={S.label}>Search District / Sub-district</div>
+                        <div style={{ display: 'flex', gap: 4, marginBottom: 6, position: 'relative' }}>
+                            <input style={{ ...S.input, flex: 1 }} placeholder="ค้นหาอำเภอ หรือ ตำบล..." value={searchQuery}
                                 onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} />
                             <button onClick={handleSearch} style={{ padding: '0 10px', borderRadius: 6, border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer', fontSize: 11 }}>🔍</button>
+
+                            {/* Search Results Dropdown */}
+                            {searchResults.length > 0 && (
+                                <div style={{
+                                    position: 'absolute', top: 34, left: 0, right: 40,
+                                    background: '#1f2937', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                                    zIndex: 50, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)'
+                                }}>
+                                    {searchResults.map((res, idx) => (
+                                        <div key={idx}
+                                            onClick={() => handleSelectSearch(res)}
+                                            style={{
+                                                padding: '8px 12px', cursor: 'pointer', fontSize: 12,
+                                                borderBottom: idx < searchResults.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                                            }}
+                                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.15)'}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                        >
+                                            <div>
+                                                <div style={{ color: 'white' }}>{res.name_th}</div>
+                                                <div style={{ color: '#9ca3af', fontSize: 10 }}>{res.name_en}</div>
+                                            </div>
+                                            <div style={{
+                                                fontSize: 10, padding: '2px 6px', borderRadius: 10,
+                                                background: res.type === 'tambon' ? '#10b981' : '#3b82f6',
+                                                color: 'white', fontWeight: 'bold'
+                                            }}>
+                                                {res.type === 'tambon' ? 'ตำบล' : 'อำเภอ'}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                         <div style={{ maxHeight: 80, overflowY: 'auto', marginBottom: 10 }}>
                             {districts.map(d => (
@@ -402,20 +677,202 @@ export default function MapDashboard() {
 
                     {/* ──── ALERTS TAB ──── */}
                     {tab === 'alerts' && (<>
-                        <div style={S.label}>Alert History</div>
-                        {alerts.length === 0 ? <p style={{ fontSize: 12, color: '#4b5563' }}>No alerts yet.</p> :
-                            alerts.map(a => (
-                                <div key={a.id} style={{
-                                    padding: '8px 10px', marginBottom: 6, borderRadius: 6, fontSize: 11,
-                                    background: a.severity === 'error' ? 'rgba(239,68,68,0.08)' : a.severity === 'warning' ? 'rgba(250,204,21,0.06)' : 'rgba(59,130,246,0.06)',
-                                    borderLeft: `3px solid ${a.severity === 'error' ? '#ef4444' : a.severity === 'warning' ? '#facc15' : '#3b82f6'}`,
-                                }}>
-                                    <div style={{ color: '#d1d5db', marginBottom: 3 }}>{a.message}</div>
-                                    <div style={{ fontSize: 9, color: '#6b7280' }}>{new Date(a.timestamp).toLocaleString()}</div>
-                                </div>
-                            ))
+                        <div style={S.label}>Critical Area Alerts ({MAPPED_ALERTS.length})</div>
+                        {MAPPED_ALERTS.length === 0 ? <p style={{ fontSize: 12, color: '#4b5563' }}>No alerts yet.</p> :
+                            MAPPED_ALERTS.map((a, idx) => {
+                                // Reverse geocode: find nearest tambon and inherit its amphoe to avoid mismatch
+                                const lat = a.latitude || 0;
+                                const lon = a.longitude || 0;
+                                let alertTitle = "ไม่ทราบตำแหน่ง";
+                                let alertSubtitle = "จ.น่าน (Nan Province)";
+
+                                if (lat && lon) {
+                                    let bestDist = Infinity;
+                                    let bestTambon = null;
+                                    for (const t of NAN_TAMBONS) {
+                                        const dist = (lon - t.c[0]) ** 2 + (lat - t.c[1]) ** 2;
+                                        if (dist < bestDist) { bestDist = dist; bestTambon = t; }
+                                    }
+
+                                    // Bounding box for Nan province approx (Lat 18.0-19.7, Lon 100.3-101.4)
+                                    const isOutsideBounds = (lat < 18.0 || lat > 19.7 || lon < 100.3 || lon > 101.4);
+
+                                    // Check distance threshold (0.05 deg^2 is roughly 15-20km)
+                                    if (bestTambon && !isOutsideBounds && bestDist < 0.05) {
+                                        // Translate English Amphoe back to Thai if possible
+                                        let amphoeTh = bestTambon.a;
+                                        const dMatch = districts.find(d => d.name_en === bestTambon.a);
+                                        if (dMatch) amphoeTh = dMatch.name_th;
+                                        alertTitle = `ต.${bestTambon.n} อ.${amphoeTh}`;
+                                    } else {
+                                        alertTitle = "นอกเขตจังหวัดน่าน / ประเทศเพื่อนบ้าน";
+                                        alertSubtitle = "Outside Nan / Laos";
+                                    }
+                                }
+
+                                // Risk-based colors
+                                const bgColor = a.risk === 'High' ? 'rgba(239,68,68,0.15)'
+                                    : a.risk === 'Medium' ? 'rgba(250,204,21,0.12)' : 'rgba(120,120,130,0.10)';
+                                const borderColor = a.risk === 'High' ? '#ef4444'
+                                    : a.risk === 'Medium' ? '#facc15' : '#6b7280';
+                                const titleColor = a.risk === 'High' ? '#fca5a5'
+                                    : a.risk === 'Medium' ? '#fde047' : '#a1a1aa';
+
+                                return (
+                                    <div key={idx}
+                                        onClick={() => {
+                                            if (lat && lon) {
+                                                setViewState(v => ({ ...v, longitude: lon, latitude: lat, zoom: 14, transitionDuration: 1000 }));
+                                                setSelectedAlert(a);
+                                            }
+                                        }}
+                                        style={{
+                                            padding: '8px 10px', marginBottom: 6, borderRadius: 6, fontSize: 11,
+                                            background: bgColor, borderLeft: `3px solid ${borderColor}`,
+                                            cursor: 'pointer', transition: 'all 0.15s',
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                                        onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                                            <b style={{ color: titleColor }}>{alertTitle}</b>
+                                            <span style={{
+                                                fontSize: 10, fontWeight: 700, color: titleColor,
+                                                background: `${borderColor}22`, padding: '1px 6px', borderRadius: 4
+                                            }}>{Math.round((a.probability || 0) * 100)}%</span>
+                                        </div>
+                                        <div style={{ color: '#d1d5db', fontSize: 10 }}>
+                                            Lat: {lat ? lat.toFixed(5) : 'N/A'}, Lon: {lon ? lon.toFixed(5) : 'N/A'}
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#6b7280', marginTop: 4 }}>
+                                            <span>{a.risk} Risk - {alertSubtitle}</span>
+                                        </div>
+                                    </div>
+                                );
+                            })
                         }
                     </>)}
+
+                    {/* ──── HISTORY TAB ──── */}
+                    {tab === 'history' && (<>
+                        <div style={S.label}>📅 Alert History (Top 200)</div>
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', gap: 6, flex: '1 1 auto' }}>
+                                <input
+                                    type="date"
+                                    value={historyStart}
+                                    onChange={e => setHistoryStart(e.target.value)}
+                                    style={{
+                                        flex: 1, padding: '7px 8px', fontSize: 11,
+                                        background: 'rgba(15,15,26,0.6)', color: '#e5e7eb',
+                                        border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8,
+                                        outline: 'none', transition: 'all 0.2s', fontFamily: 'inherit',
+                                        colorScheme: 'dark', minWidth: 0
+                                    }}
+                                    onFocus={e => e.currentTarget.style.borderColor = '#3b82f6'}
+                                    onBlur={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'}
+                                />
+                                <span style={{ color: '#6b7280', alignSelf: 'center', fontWeight: 'bold' }}>-</span>
+                                <input
+                                    type="date"
+                                    value={historyEnd}
+                                    onChange={e => setHistoryEnd(e.target.value)}
+                                    style={{
+                                        flex: 1, padding: '7px 8px', fontSize: 11,
+                                        background: 'rgba(15,15,26,0.6)', color: '#e5e7eb',
+                                        border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8,
+                                        outline: 'none', transition: 'all 0.2s', fontFamily: 'inherit',
+                                        colorScheme: 'dark', minWidth: 0
+                                    }}
+                                    onFocus={e => e.currentTarget.style.borderColor = '#3b82f6'}
+                                    onBlur={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'}
+                                />
+                            </div>
+                            <button onClick={fetchHistory} disabled={historyLoading}
+                                style={{
+                                    background: historyLoading ? '#374151' : 'linear-gradient(135deg, #3b82f6, #6366f1)',
+                                    color: 'white', border: 'none', borderRadius: 8, padding: '7px 14px',
+                                    fontSize: 11, fontWeight: 600, cursor: historyLoading ? 'not-allowed' : 'pointer',
+                                    boxShadow: '0 2px 8px rgba(59,130,246,0.25)', transition: 'all 0.2s',
+                                    flex: '0 0 auto'
+                                }}
+                                onMouseEnter={e => { if (!historyLoading) e.currentTarget.style.filter = 'brightness(1.1)'; }}
+                                onMouseLeave={e => { if (!historyLoading) e.currentTarget.style.filter = 'brightness(1)'; }}
+                            >
+                                {historyLoading ? '...' : 'Filter'}
+                            </button>
+                        </div>
+
+                        {historyAlerts.length === 0 && !historyLoading ? <p style={{ fontSize: 12, color: '#4b5563' }}>No historical alerts found.</p> :
+                            historyAlerts.slice(0, 200).map((a, idx) => {
+                                // Logic to get Tambon/Amphoe
+                                const lat = a.latitude || 0;
+                                const lon = a.longitude || 0;
+                                let alertTitle = "ไม่ทราบตำแหน่ง";
+                                let alertSubtitle = "จ.น่าน (Nan Province)";
+
+                                if (lat && lon) {
+                                    let bestDist = Infinity;
+                                    let bestTambon = null;
+                                    for (const t of NAN_TAMBONS) {
+                                        const dist = (lon - t.c[0]) ** 2 + (lat - t.c[1]) ** 2;
+                                        if (dist < bestDist) { bestDist = dist; bestTambon = t; }
+                                    }
+
+                                    const isOutsideBounds = (lat < 18.0 || lat > 19.7 || lon < 100.3 || lon > 101.4);
+                                    if (bestTambon && !isOutsideBounds && bestDist < 0.05) {
+                                        let amphoeTh = bestTambon.a;
+                                        const dMatch = districts.find(d => d.name_en === bestTambon.a);
+                                        if (dMatch) amphoeTh = dMatch.name_th;
+                                        alertTitle = `ต.${bestTambon.n} อ.${amphoeTh}`;
+                                    } else {
+                                        alertTitle = "นอกเขตจังหวัดน่าน / ประเทศเพื่อนบ้าน";
+                                        alertSubtitle = "Outside Nan / Laos";
+                                    }
+                                }
+
+                                // Risk-based colors
+                                const bgColor = a.risk === 'High' ? 'rgba(239,68,68,0.15)'
+                                    : a.risk === 'Medium' ? 'rgba(250,204,21,0.12)' : 'rgba(120,120,130,0.10)';
+                                const borderColor = a.risk === 'High' ? '#ef4444'
+                                    : a.risk === 'Medium' ? '#facc15' : '#6b7280';
+                                const titleColor = a.risk === 'High' ? '#fca5a5'
+                                    : a.risk === 'Medium' ? '#fde047' : '#a1a1aa';
+
+                                return (
+                                    <div key={idx}
+                                        onClick={() => {
+                                            if (lat && lon) {
+                                                setViewState(v => ({ ...v, longitude: lon, latitude: lat, zoom: 14, transitionDuration: 1000 }));
+                                                setSelectedAlert(a);
+                                            }
+                                        }}
+                                        style={{
+                                            padding: '8px 10px', marginBottom: 6, borderRadius: 6, fontSize: 11,
+                                            background: bgColor, borderLeft: `3px solid ${borderColor}`,
+                                            cursor: 'pointer', transition: 'all 0.15s',
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                                        onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                                            <b style={{ color: titleColor }}>{alertTitle}</b>
+                                            <span style={{
+                                                fontSize: 10, fontWeight: 700, color: titleColor,
+                                                background: `${borderColor}22`, padding: '1px 6px', borderRadius: 4
+                                            }}>{Math.round((a.probability || 0) * 100)}%</span>
+                                        </div>
+                                        <div style={{ color: '#d1d5db', fontSize: 10 }}>
+                                            Lat: {lat ? lat.toFixed(5) : 'N/A'}, Lon: {lon ? lon.toFixed(5) : 'N/A'}
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#6b7280', marginTop: 4 }}>
+                                            <span>{a.risk} Risk - {alertSubtitle}</span>
+                                            <span style={{ color: '#9ca3af', background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: 3 }}>🕒 {new Date(a.timestamp).toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                                        </div>
+                                    </div>
+                                );
+                            })
+                        }
+                    </>)}
+
                 </div>
 
                 {/* ──── PERSISTENT CHAT ──── */}

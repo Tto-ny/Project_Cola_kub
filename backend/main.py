@@ -35,6 +35,8 @@ alert_logs = []
 
 @app.on_event("startup")
 def on_startup():
+    from database import Base, engine
+    Base.metadata.create_all(bind=engine)
     load_model()
 
 # ── Authentication ──
@@ -117,9 +119,11 @@ def get_grid_data(db: Session = Depends(get_db)):
     cells = db.query(GridCell).all()
     result = []
     for c in cells:
+        poly = c.polygon if isinstance(c.polygon, list) else json.loads(c.polygon) if c.polygon else []
+        props = c.properties if isinstance(c.properties, dict) else json.loads(c.properties) if c.properties else {}
         result.append({
-            "polygon": c.polygon,
-            "properties": c.properties,
+            "polygon": poly,
+            "properties": props,
             "risk": c.risk
         })
     return JSONResponse(content=result)
@@ -148,7 +152,7 @@ def get_rainfall(lat: float = 18.8, lon: float = 100.78, hours: int = 24):
 def predict_now(db: Session = Depends(get_db), current_user: Officer = Depends(get_current_user)):
     # For performance, avoid instantiating 117k SQLAlchemy objects. Query specific columns instead.
     from sqlalchemy.orm import load_only
-    cells = db.query(GridCell).options(load_only(GridCell.id, GridCell.polygon, GridCell.properties, GridCell.risk)).all()
+    cells = db.query(GridCell).options(load_only(GridCell.id, GridCell.latitude, GridCell.longitude, GridCell.polygon, GridCell.properties, GridCell.risk)).all()
     
     if not cells:
         return {"error": "No grid data in database. Run extraction first."}
@@ -157,6 +161,9 @@ def predict_now(db: Session = Depends(get_db), current_user: Officer = Depends(g
     grid_data = []
     for c in cells:
         grid_data.append({
+            "id": c.id,
+            "latitude": c.latitude,
+            "longitude": c.longitude,
             "polygon": c.polygon,
             "properties": c.properties,
             "risk": c.risk
@@ -178,36 +185,66 @@ def predict_now(db: Session = Depends(get_db), current_user: Officer = Depends(g
     update_mappings = []
     import json
     for i, row in enumerate(results):
+        # Handle null grids when extracting
+        base_id = cells[i].id
+        grid_id = base_id if base_id else f"mock_{i}"
+
         update_mappings.append({
-            "id": cells[i].id,
-            "risk": row.get('risk', 'Low'),
-            "prediction_probability": row.get('probability', 0),
+            "id": grid_id,
+            "risk": str(row.get('risk', 'Low')),
+            "prediction_probability": float(row.get('probability', 0.0)),
             "properties": json.dumps(row.get('properties', {}))
         })
         
-    # Use raw SQL executemany for ultimate performance to bypass ORM overhead
-    print("Executing high-speed raw SQL update...")
-    conn = db.connection()
+    # Single-transaction bulk update (SQLite = instant, no network overhead)
+    print("Executing bulk SQL update (single transaction)...")
+    import time
+    t_start = time.time()
     
-    # We will just do a standard raw execute in chunks of 5000 to be safe
-    chunk_size = 5000
-    for i in range(0, len(update_mappings), chunk_size):
-        chunk = update_mappings[i:i + chunk_size]
-        
-        # Raw SQLAlchemy text execution
-        from sqlalchemy import text
-        stmt = text("""
-            UPDATE grid_data 
-            SET properties = :properties, 
-                risk = :risk, 
-                prediction_probability = :prediction_probability 
-            WHERE id = :id
-        """)
-        
-        # Execute the chunk
-        conn.execute(stmt, chunk)
-        db.commit()
-        print(f"Saved chunk {i//chunk_size + 1}/{(len(update_mappings) + chunk_size - 1)//chunk_size}")
+    from sqlalchemy import text
+    stmt = text("""
+        UPDATE grid_data 
+        SET properties = :properties, 
+            risk = :risk, 
+            prediction_probability = :prediction_probability 
+        WHERE id = :id
+    """)
+    
+    conn = db.connection()
+    conn.execute(stmt, update_mappings)
+    
+    # Save High/Medium alerts to History Log
+    from database import AlertHistory
+    history_objects = []
+    current_time = datetime.now().isoformat()
+    for update in update_mappings:
+        if update["risk"] in ["High", "Medium"]:
+            # Find corresponding lat/lon from cells array (mapped by ID)
+            # Since cells order might not map 1:1 if mock_id used, let's use the index safely
+            idx = int(str(update["id"]).replace("mock_", "")) if str(update["id"]).startswith("mock_") else None
+            # If base_id was used, find index in cells
+            c = next((c for c in cells if str(c.id) == str(update["id"])), None)
+            if c:
+                history_objects.append(
+                    AlertHistory(
+                        longitude=c.longitude,
+                        latitude=c.latitude,
+                        risk=update["risk"],
+                        probability=update["prediction_probability"],
+                        timestamp=current_time,
+                        properties=update["properties"] # json string
+                    )
+                )
+
+    if history_objects:
+        db.add_all(history_objects)
+        print(f"Saved {len(history_objects)} alerts to AlertHistory.")
+
+    db.commit()
+    
+    elapsed = time.time() - t_start
+    print(f"[DONE] Saved {len(update_mappings)} predictions and {len(history_objects)} history records in {elapsed:.2f} seconds")
+
         
     # Calculate Summary
     rainfall_sample = results[0]['properties'].get('CHIRPS_Day_1', 0) if results else 0
@@ -231,20 +268,52 @@ def get_predicted_data(db: Session = Depends(get_db)):
     from sqlalchemy import text
     conn = db.connection()
     # Use raw SQL to completely bypass ORM overhead for 117k records (huge performance boost)
-    stmt = text("SELECT polygon, properties, risk, prediction_probability FROM grid_data")
+    stmt = text("SELECT polygon, properties, risk, prediction_probability, latitude, longitude FROM grid_data")
     result = conn.execute(stmt).fetchall()
     
     # Format the raw tuples into a list of dicts for JSON serialization
-    formatted_result = [
-        {
-            "polygon": row[0],
-            "properties": row[1],
+    # SQLite returns JSON columns as strings, so we need to parse them
+    formatted_result = []
+    for row in result:
+        poly = row[0] if isinstance(row[0], (list, dict)) else json.loads(row[0]) if row[0] else []
+        props = row[1] if isinstance(row[1], (list, dict)) else json.loads(row[1]) if row[1] else {}
+        formatted_result.append({
+            "polygon": poly,
+            "properties": props,
             "risk": row[2],
-            "probability": float(row[3]) if row[3] is not None else 0.0
-        }
-        for row in result
-    ]
+            "probability": float(row[3]) if row[3] is not None else 0.0,
+            "latitude": float(row[4]) if row[4] is not None else 0.0,
+            "longitude": float(row[5]) if row[5] is not None else 0.0
+        })
     return JSONResponse(content=formatted_result)
+
+@app.get("/api/alert_history")
+def get_alert_history(start_date: str = None, end_date: str = None, db: Session = Depends(get_db)):
+    from database import AlertHistory
+    query = db.query(AlertHistory)
+    
+    if start_date:
+        query = query.filter(AlertHistory.timestamp >= start_date)
+    if end_date:
+        if len(end_date) == 10:  # just YYYY-MM-DD
+            query = query.filter(AlertHistory.timestamp <= f"{end_date}T23:59:59")
+        else:
+            query = query.filter(AlertHistory.timestamp <= end_date)
+            
+    history = query.order_by(AlertHistory.timestamp.desc()).all()
+    
+    result = []
+    for h in history:
+        result.append({
+            "id": h.id,
+            "latitude": h.latitude,
+            "longitude": h.longitude,
+            "risk": h.risk,
+            "probability": h.probability,
+            "timestamp": h.timestamp,
+            "properties": json.loads(h.properties) if h.properties and isinstance(h.properties, str) else (h.properties or {})
+        })
+    return JSONResponse(content=result)
 
 # ── What-If Simulation (uses cached grid data, no GEE call) ──
 class WhatIfRequest(BaseModel):
@@ -257,8 +326,10 @@ def whatif_simulation(req: WhatIfRequest, db: Session = Depends(get_db)):
     """Find nearest grid cell via SQL, apply custom rainfall, predict."""
     
     # Use SQL math to find the closest Euclidean distance directly in Postgres
+    # Use multiplication instead of func.pow() for SQLite compatibility
     closest_cell = db.query(GridCell).order_by(
-        func.pow(GridCell.longitude - req.lon, 2) + func.pow(GridCell.latitude - req.lat, 2)
+        (GridCell.longitude - req.lon) * (GridCell.longitude - req.lon) + 
+        (GridCell.latitude - req.lat) * (GridCell.latitude - req.lat)
     ).first()
     
     if not closest_cell:
