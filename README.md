@@ -23,12 +23,21 @@
 ## 🚀 วิธีการติดตั้งและรันระบบแบบ Local (How to Run on Localhost)
 
 ### 1. การตั้งค่าไฟล์ `.env` สำหรับ Backend
-สร้างไฟล์ `.env` ไว้ในโฟลเดอร์ `backend/` โดยใส่ค่าดังต่อไปนี้:
+สร้างไฟล์ `.env` ไว้ในโฟลเดอร์ `backend/` โดยมีรายละเอียดดังนี้:
+
 ```env
-GEE_PROJECT_ID=<YOUR_GEE_PROJECT_ID>
-# ใช้ SQLite สำหรับ Local Development
+# 1. GEE_PROJECT_ID: ไอดีโปรเจคจาก Google Cloud
+# วิธีเอา: ไปที่ https://console.cloud.google.com/ สร้างโปรเจคใหม่ 
+# และเปิดใช้งาน (Enable) "Google Earth Engine API" จากนั้นนำ Project ID มาใส่
+GEE_PROJECT_ID=your-project-id-123
+
+# 2. DATABASE_URL: ที่อยู่ของฐานข้อมูล
+# สำหรับ Local (เครื่องตัวเอง) ให้ใช้ค่าด้านล่างนี้ได้เลย ระบบจะสร้างไฟล์ .db ให้เองอัตโนมัติ
 DATABASE_URL=sqlite:///./landslide.db
-SECRET_KEY=your-secret-key-here
+
+# 3. SECRET_KEY: รหัสลับสำหรับความปลอดภัยของ Login
+# สามารถพิมพ์สุ่มอะไรก็ได้ยาวๆ เช่น my-super-secret-key-2024
+SECRET_KEY=any-random-string-here
 ```
 
 ### 2. การเตรียม Backend (FastAPI + Python)
