@@ -81,6 +81,22 @@ npm run dev
 ```
 *💡 Frontend จะรันอยู่ที่ `http://localhost:5173`*
 
+### 4. การเตรียมสภาพแวดล้อมสำหรับเทรนโมเดล (Machine Learning Training)
+สำหรับการเทรนโมเดลด้วย `retrain_model.py` หรือใช้งาน Jupyter Notebook กรุณาสร้าง Virtual Environment แยกต่างหากเพื่อไม่ให้แพ็กเกจรบกวนกันกับฝั่ง Backend:
+
+```bash
+# อยู่ที่หน้าโฟลเดอร์หลัก (Root directory) ของโปรเจค
+# 1. สร้าง Virtual Environment ใหม่สำหรับเทรนโมเดล
+python -m venv venv_ml
+.\venv_ml\Scripts\activate  # Windows
+
+# 2. ติดตั้ง Dependencies ที่จำเป็น
+pip install -r requirements.txt
+
+# 3. รันสคริปต์เทรนโมเดล
+python retrain_model.py
+```
+
 ---
 
 ## 🗺️ การใช้งานระบบเบื้องต้น
