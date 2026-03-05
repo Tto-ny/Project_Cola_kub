@@ -46,8 +46,8 @@ SECRET_KEY=any-random-string-here
 
 ```bash
 # 1. สร้าง Virtual Environment (ใช้ชื่อ venv_ml เพื่อป้องกันความสับสนกับของเก่า)
-py -m venv venv_ml
-.\venv_ml\Scripts\activate  # Windows
+py -m venv venv
+.\venv\Scripts\activate  # Windows
 
 # 2. ติดตั้ง Dependencies รวดเดียว (รวม Backend + Model Training)
 pip install -r requirements.txt
