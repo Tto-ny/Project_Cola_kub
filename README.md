@@ -46,7 +46,7 @@ SECRET_KEY=any-random-string-here
 
 ```bash
 # 1. สร้าง Virtual Environment (ใช้ชื่อ venv_ml เพื่อป้องกันความสับสนกับของเก่า)
-python -m venv venv_ml
+py -m venv venv_ml
 .\venv_ml\Scripts\activate  # Windows
 
 # 2. ติดตั้ง Dependencies รวดเดียว (รวม Backend + Model Training)
@@ -61,10 +61,10 @@ cd backend
 
 # เตรียมฐานข้อมูลและนำเข้าข้อมูล Grid (ทำครั้งแรก)
 # คำสั่งนี้จะสร้าง landslide.db และนำเข้าข้อมูลจากไฟล์ JSON/CSV
-python database_migrator.py
+py database_migrator.py
 
 # สร้าง Account ผู้ดูแล (Admin) สำหรับ Login
-python create_admin.py
+py create_admin.py
 
 # รันเซิฟเวอร์ API
 uvicorn main:app --host 0.0.0.0 --port 8000
