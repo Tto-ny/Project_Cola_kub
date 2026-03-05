@@ -40,33 +40,38 @@ DATABASE_URL=sqlite:///./landslide.db
 SECRET_KEY=any-random-string-here
 ```
 
-### 2. การเตรียม Backend (FastAPI + Python)
-เปิด Terminal และรันคำสั่งต่อไปนี้:
+### 2. การเตรียมสภาพแวดล้อม (Backend สลับกับ ML Training) 
+เพื่อความง่าย ไม่ต้องลงแพ็กเกจหลายรอบ เราจะใช้ **Virtual Environment ตัวเดียวจบครอบคลุมทั้งโปรเจค**
+เปิด Terminal หน้าโฟลเดอร์หลัก (Root) และรันคำสั่งต่อไปนี้:
+
+```bash
+# 1. สร้าง Virtual Environment (ใช้ชื่อ venv_ml เพื่อป้องกันความสับสนกับของเก่า)
+python -m venv venv_ml
+.\venv_ml\Scripts\activate  # Windows
+
+# 2. ติดตั้ง Dependencies รวดเดียว (รวม Backend + Model Training)
+pip install -r requirements.txt
+```
+
+### 3. เตรียมฐานข้อมูลและรันเซิฟเวอร์ (Backend)
 
 ```bash
 # เข้าสู่โฟลเดอร์ backend
 cd backend
 
-# 1. สร้าง Virtual Environment
-python -m venv venv
-.\venv\Scripts\activate  # Windows
-
-# 2. ติดตั้ง Dependencies
-pip install -r requirements.txt
-
-# 3. เตรียมฐานข้อมูลและนำเข้าข้อมูล Grid (ทำครั้งแรก)
+# เตรียมฐานข้อมูลและนำเข้าข้อมูล Grid (ทำครั้งแรก)
 # คำสั่งนี้จะสร้าง landslide.db และนำเข้าข้อมูลจากไฟล์ JSON/CSV
 python database_migrator.py
 
-# 4. สร้าง Account ผู้ดูแล (Admin) สำหรับ Login
+# สร้าง Account ผู้ดูแล (Admin) สำหรับ Login
 python create_admin.py
 
-# 5. รันเซิฟเวอร์ API
+# รันเซิฟเวอร์ API
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 *💡 Backend จะรันอยู่ที่ `http://localhost:8000`*
 
-### 3. การเตรียม Frontend (React + Vite)
+### 4. การเตรียม Frontend (React + Vite)
 เปิด Terminal **หน้าต่างใหม่** และรันคำสั่งต่อไปนี้:
 
 ```bash
@@ -81,22 +86,6 @@ npm run dev
 ```
 *💡 Frontend จะรันอยู่ที่ `http://localhost:5173`*
 
-### 4. การเตรียมสภาพแวดล้อมสำหรับเทรนโมเดล (Machine Learning Training)
-สำหรับการเทรนโมเดลด้วย `retrain_model.py` หรือใช้งาน Jupyter Notebook กรุณาสร้าง Virtual Environment แยกต่างหากเพื่อไม่ให้แพ็กเกจรบกวนกันกับฝั่ง Backend:
-
-```bash
-# อยู่ที่หน้าโฟลเดอร์หลัก (Root directory) ของโปรเจค
-# 1. สร้าง Virtual Environment ใหม่สำหรับเทรนโมเดล
-python -m venv venv_ml
-.\venv_ml\Scripts\activate  # Windows
-
-# 2. ติดตั้ง Dependencies ที่จำเป็น
-pip install -r requirements.txt
-
-# 3. รันสคริปต์เทรนโมเดล
-python retrain_model.py
-```
-
 ---
 
 ## 🗺️ การใช้งานระบบเบื้องต้น
@@ -107,11 +96,16 @@ python retrain_model.py
 
 ---
 
-## 🧠 โมเดล Machine Learning (Random Forest)
-ระดับความเสี่ยงจะถูกประเมินจากสมการความน่าจะเป็น (Probability Score `p`):
-- `p < 0.35` 🟢 **Low Risk:** พื้นที่ปลอดภัย/เฝ้าระวังปกติ
-- `0.35 <= p < 0.70` 🟡 **Medium Risk:** แจ้งเตือนระดับเฝ้าระวัง
-- `p >= 0.70` 🔴 **High Risk:** อันตราย เสี่ยงดินถล่มสูง เตรียมอพยพ!
+## 🧠 โมเดล Machine Learning (Random Forest / LightGBM / CatBoost)
+
+ระดับความเสี่ยงจะถูกประเมินจากสมการความน่าจะเป็น (Probability Score `p` สำหรับคลาสที่มีความเสี่ยง):
+- `p <= 0.3` 🟢 **Low Risk:** พื้นที่ปลอดภัย/เฝ้าระวังปกติ
+- `0.3 < p <= 0.6` 🟡 **Medium Risk:** แจ้งเตือนระดับเฝ้าระวัง
+- `p > 0.6`  🔴 **High Risk:** อันตราย เสี่ยงดินถล่มสูง เตรียมอพยพ!
+
+### สคริปต์สำหรับการเทรนโมเดล (Training Scripts)
+หากต้องการเทรนโมเดลด้วยตัวเองซ้ำ สามารถใช้สคริปต์ที่อยู่ในโฟลเดอร์หลักได้ (ผ่าน `venv_ml` ที่ติดตั้งเตรียมไว้แล้ว):
+- `retrain_model_04.py` / `retrain_model_05.py`: สคริปต์เทรนโมเดลล่าสุด (รองรับ LightGBM, CatBoost) แบบ Hyper-parameter Tuning พร้อมสร้างกราฟผลการประเมิน (รูปกราฟต่างๆ `01_` ถึง `06_` จะถูกปริ้นท์ออกมาดูได้ทันที)
 
 ---
 
@@ -120,7 +114,7 @@ python retrain_model.py
 - **Node.js 18+**
 - **Libraries สำคัญ:**
     - `FastAPI`, `SQLAlchemy` (ORM)
-    - `scikit-learn`, `numpy`, `pandas` (ML/Data)
+    - `scikit-learn`, `numpy`, `pandas`, `lightgbm`, `catboost` (ML/Data)
     - `earthengine-api` (GEE)
     - `PyJWT`, `bcrypt` (Auth)
     - `react-map-gl`, `deck.gl` (Visualization)

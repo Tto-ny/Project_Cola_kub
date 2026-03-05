@@ -62,14 +62,22 @@ def predict_risk(features: dict) -> dict:
             
             # Try to get probability
             try:
+                # Assuming model is binary classification where class 1 is landslide
                 proba = _model.predict_proba(X)[0]
-                max_prob = float(max(proba))
+                if len(proba) > 1:
+                    max_prob = float(proba[1]) # Use probability of landslide (class 1)
+                else:
+                    max_prob = float(max(proba))
             except:
                 max_prob = 0.0
             
-            # Map prediction to risk level
-            risk_map = {0: 'Low', 1: 'Medium', 2: 'High'}
-            risk = risk_map.get(int(prediction), 'Low')
+            # Map prediction using probability threshold
+            if max_prob > 0.6:
+                risk = 'High'
+            elif max_prob > 0.3:
+                risk = 'Medium'
+            else:
+                risk = 'Low'
             
             return {"risk": risk, "probability": max_prob, "prediction_raw": int(prediction)}
         except Exception as e:
