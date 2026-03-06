@@ -186,15 +186,15 @@ landslide_pts = best_p[y_test == 1]
 safe_pts = best_p[y_test == 0]
 
 def get_tier_pct(p):
-    return [(p <= 0.3).sum()/len(p)*100, ((p > 0.3) & (p <= 0.6)).sum()/len(p)*100, (p > 0.6).sum()/len(p)*100]
+    return [(p <= 0.2).sum()/len(p)*100, ((p > 0.2) & (p <= 0.6)).sum()/len(p)*100, (p > 0.6).sum()/len(p)*100]
 
 tier_landslide = get_tier_pct(landslide_pts)
 tier_safe = get_tier_pct(safe_pts)
 
 fig, ax = plt.subplots(figsize=(8, 5))
 labels = ['Actual Landslide (1)', 'Safe Zone (0)']
-b1 = ax.bar(labels, [tier_landslide[0], tier_safe[0]], label='Low Risk (<= 0.3)', color='#A6A6A6')
-b2 = ax.bar(labels, [tier_landslide[1], tier_safe[1]], bottom=[tier_landslide[0], tier_safe[0]], label='Medium Risk (0.3 - 0.6)', color='#FFC000')
+b1 = ax.bar(labels, [tier_landslide[0], tier_safe[0]], label='Low Risk (<= 0.2)', color='#A6A6A6')
+b2 = ax.bar(labels, [tier_landslide[1], tier_safe[1]], bottom=[tier_landslide[0], tier_safe[0]], label='Medium Risk (0.2 - 0.6)', color='#FFC000')
 b3 = ax.bar(labels, [tier_landslide[2], tier_safe[2]], bottom=[tier_landslide[0]+tier_landslide[1], tier_safe[0]+tier_safe[1]], label='High Risk (> 0.6)', color='#FF0000')
 
 plt.ylabel('Percentage (%)')
