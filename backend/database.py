@@ -43,6 +43,17 @@ class Officer(Base):
     password_hash = Column(String(255), nullable=False)
     role = Column(String(50), default="officer")
 
+class HistoricalLandslidePoint(Base):
+    __tablename__ = "historical_landslide_points"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    latitude = Column(Float, index=True)
+    longitude = Column(Float, index=True)
+    tambon = Column(String(100), nullable=True)
+    district = Column(String(100), nullable=True)
+    province = Column(String(100), default="น่าน")
+    source = Column(String(100))  # e.g. 'cleaned_data' or 'landslide_final_v2'
+
 # Auto-create tables on import
 Base.metadata.create_all(bind=engine)
 

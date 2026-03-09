@@ -108,6 +108,10 @@ export default function MapDashboard() {
     const [historyEnd, setHistoryEnd] = useState('');
     const [historyLoading, setHistoryLoading] = useState(false);
 
+    // Historical landslide points overlay
+    const [historicalPoints, setHistoricalPoints] = useState([]);
+    const [showHistorical, setShowHistorical] = useState(false);
+
     // Mapped Alerts based on predictions — all risk levels, top 100 by probability
     const MAPPED_ALERTS = React.useMemo(() => {
         let alerts = [...gridData];
@@ -116,6 +120,62 @@ export default function MapDashboard() {
         // Top 100 only
         return alerts.slice(0, 100);
     }, [gridData]);
+
+    // Match historical points to existing grid cells (spatial hash for fast lookup)
+    const historicalGridCells = React.useMemo(() => {
+        try {
+            if (!historicalPoints || !gridData || historicalPoints.length === 0 || gridData.length === 0) return [];
+
+            // Build spatial hash from grid cells (~0.01° buckets)
+            const gridMap = new globalThis.Map();
+            for (const cell of gridData) {
+                const poly = cell.polygon;
+                if (!poly || !Array.isArray(poly) || poly.length < 4) continue;
+                if (!Array.isArray(poly[0]) || !Array.isArray(poly[2])) continue;
+                const cx = cell.longitude || ((poly[0][0] + poly[2][0]) / 2);
+                const cy = cell.latitude || ((poly[0][1] + poly[2][1]) / 2);
+                if (isNaN(cx) || isNaN(cy)) continue;
+                const key = `${Math.round(cx * 111)}_${Math.round(cy * 111)}`;
+                if (!gridMap.has(key)) gridMap.set(key, []);
+                gridMap.get(key).push({ polygon: poly, cx, cy });
+            }
+
+            // Match each historical point to nearest grid cell
+            const matched = new globalThis.Map();
+            for (const pt of historicalPoints) {
+                if (!pt.longitude || !pt.latitude) continue;
+                let bestCell = null, bestDist = Infinity;
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        const sk = `${Math.round(pt.longitude * 111) + dx}_${Math.round(pt.latitude * 111) + dy}`;
+                        const bucket = gridMap.get(sk);
+                        if (!bucket) continue;
+                        for (const c of bucket) {
+                            const dist = (c.cx - pt.longitude) ** 2 + (c.cy - pt.latitude) ** 2;
+                            if (dist < bestDist) { bestDist = dist; bestCell = c; }
+                        }
+                    }
+                }
+                if (bestCell) {
+                    const ck = `${bestCell.cx.toFixed(6)}_${bestCell.cy.toFixed(6)}`;
+                    if (!matched.has(ck)) matched.set(ck, { polygon: bestCell.polygon, count: 0, tambons: new Set(), districts: new Set() });
+                    const e = matched.get(ck);
+                    e.count++;
+                    if (pt.tambon) e.tambons.add(pt.tambon);
+                    if (pt.district) e.districts.add(pt.district);
+                }
+            }
+
+            return Array.from(matched.values()).map(e => ({
+                polygon: e.polygon, count: e.count, isHistorical: true,
+                tambons: Array.from(e.tambons).join(', '),
+                districts: Array.from(e.districts).join(', '),
+            }));
+        } catch (err) {
+            console.error('historicalGridCells error:', err);
+            return [];
+        }
+    }, [historicalPoints, gridData]);
     const [selectedAlert, setSelectedAlert] = useState(null);
     // Chat state
     const [chatMessages, setChatMessages] = useState([
@@ -153,20 +213,39 @@ export default function MapDashboard() {
         }).catch(() => { });
 
         fetchAlerts();
+
+        // Fetch historical landslide points
+        fetch(`${API}/api/historical_points`).then(r => r.json()).then(data => {
+            if (Array.isArray(data)) { setHistoricalPoints(data); }
+        }).catch(() => { });
     }, []);
 
-    const buildLayers = useCallback((data, f, pin) => {
+    const buildLayers = useCallback((data, f, pin, histGridCells, showHist) => {
         const arr = [];
         arr.push(new PolygonLayer({
             id: 'risk-grid',
-            // ถ้ายืนยันว่า risk ไม่มี หรือ risk เป็นค่าที่เปิด Filter ไว้ ถึงจะแสด
             data: data.filter(d => !d.risk || f[d.risk]),
             pickable: true, stroked: false,
             filled: true, extruded: false,
             getPolygon: d => d.polygon,
-            getFillColor: d => RISK_COLORS[d.risk] || [128, 128, 128, 150], // สีเทาเริ่มต้น
+            getFillColor: d => RISK_COLORS[d.risk] || [128, 128, 128, 150],
             updateTriggers: { getFillColor: [f] }
         }));
+        if (showHist && histGridCells.length > 0) {
+            arr.push(new PolygonLayer({
+                id: 'historical-grid',
+                data: histGridCells,
+                pickable: true,
+                stroked: true,
+                filled: true,
+                extruded: false,
+                getPolygon: d => d.polygon,
+                getFillColor: [255, 180, 50, 160],
+                getLineColor: [200, 130, 20, 255],
+                getLineWidth: 2,
+                lineWidthMinPixels: 1,
+            }));
+        }
         if (pin) {
             arr.push(new ScatterplotLayer({
                 id: 'whatif-pin', data: [pin], pickable: false,
@@ -178,7 +257,7 @@ export default function MapDashboard() {
         return arr;
     }, []);
 
-    useEffect(() => { setLayers(buildLayers(gridData, filters, whatIfPin)); }, [gridData, filters, whatIfPin, buildLayers]);
+    useEffect(() => { setLayers(buildLayers(gridData, filters, whatIfPin, historicalGridCells, showHistorical)); }, [gridData, filters, whatIfPin, historicalGridCells, showHistorical, buildLayers]);
 
     const pollStatus = async () => {
         for (let i = 0; i < 200; i++) {
@@ -368,6 +447,18 @@ export default function MapDashboard() {
                 getCursor={() => whatIfMode ? 'crosshair' : 'grab'}
                 getTooltip={({ object }) => {
                     if (!object) return null;
+
+                    // Historical grid cell tooltip
+                    if (object.isHistorical) {
+                        let html = `<div style="font:11px monospace;line-height:1.6;max-width:220px;">`;
+                        html += `<b style="color:#fbbf24;font-size:13px;">📍 จุดดินถล่มในอดีต</b><br/>`;
+                        html += `<span style="color:#aaa;">จำนวนเหตุการณ์:</span> <b>${object.count}</b><br/>`;
+                        if (object.tambons) html += `<span style="color:#aaa;">ตำบล:</span> ${object.tambons}<br/>`;
+                        if (object.districts) html += `<span style="color:#aaa;">อำเภอ:</span> ${object.districts}`;
+                        html += `</div>`;
+                        return { html, style: { background: 'rgba(20,20,30,0.95)', color: '#eee', borderRadius: 8, padding: 10, border: '1px solid #b45309', backdropFilter: 'blur(4px)' } };
+                    }
+
                     const props = object.properties || {};
                     let tooltipHtml = `<div style="font:11px monospace;line-height:1.5;max-width:250px;">`;
                     if (object.risk) {
@@ -560,6 +651,15 @@ export default function MapDashboard() {
                                     <span style={{ width: 10, height: 10, borderRadius: 2, background: `rgba(${RISK_COLORS[l].join(',')})` }} />{l}
                                 </label>
                             ))}
+                        </div>
+
+                        <div style={S.label}>Overlay Layers</div>
+                        <div style={{ marginBottom: 10 }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, cursor: 'pointer', color: '#ccc' }}>
+                                <input type="checkbox" checked={showHistorical} onChange={() => setShowHistorical(v => !v)} />
+                                <span style={{ width: 10, height: 10, borderRadius: 2, background: 'rgba(255,180,50,0.85)' }} />
+                                📍 จุดดินถล่มในอดีต ({historicalGridCells.length} กริด)
+                            </label>
                         </div>
 
                         <div style={S.label}>Search District / Sub-district</div>

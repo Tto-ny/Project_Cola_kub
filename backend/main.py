@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from database import get_db, GridCell, SessionLocal, Officer
+from database import get_db, GridCell, SessionLocal, Officer, HistoricalLandslidePoint
 from auth import verify_password, create_access_token, decode_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from services.gee_extractor import extract_gee_data
 from services.spatial_search import search_location, get_all_districts
@@ -367,6 +367,21 @@ def whatif_simulation(req: WhatIfRequest, db: Session = Depends(get_db)):
         "prediction": prediction,
         "timestamp": datetime.now().isoformat()
     }
+
+# ── Historical Landslide Points ──
+@app.get("/api/historical_points")
+def get_historical_points(db: Session = Depends(get_db)):
+    points = db.query(HistoricalLandslidePoint).all()
+    return JSONResponse(content=[
+        {
+            "latitude": p.latitude,
+            "longitude": p.longitude,
+            "tambon": p.tambon,
+            "district": p.district,
+            "source": p.source,
+        }
+        for p in points
+    ])
 
 # ── Chatbot ──
 class ChatRequest(BaseModel):
