@@ -78,8 +78,8 @@ def fetch_openmeteo_batch(control_points):
                 all_rainfall.append(daily_precip_reversed[:10])
                 
             print(f"  -> Fetched chunk {i//chunk_size + 1}, got {len(chunk)} locations.")
-            # พักสักนิดกันโดน Block (Free tier ให้ 60 calls / min)
-            time.sleep(1.0)
+            # พักกันโดน Block (Free tier ให้ 60 calls / min)
+            time.sleep(5.0)
             
         except Exception as e:
             if "Please try again in one minute" in str(e):

@@ -38,6 +38,11 @@ DATABASE_URL=sqlite:///./landslide.db
 # 3. SECRET_KEY: รหัสลับสำหรับความปลอดภัยของ Login
 # สามารถพิมพ์สุ่มอะไรก็ได้ยาวๆ เช่น my-super-secret-key-2024
 SECRET_KEY=any-random-string-here
+
+# 4. KKU_AI_API_KEY: API Key สำหรับ AI Chatbot (KKU Gen AI)
+# วิธีเอา: สมัครที่ https://gen.ai.kku.ac.th/ แล้วนำ API Key มาใส่
+# ⚠️ ถ้าไม่มี Key นี้ ฟีเจอร์ Chatbot จะไม่สามารถใช้งานได้ (ส่วนอื่นยังใช้ได้ปกติ)
+KKU_AI_API_KEY=your-kku-ai-api-key-here
 ```
 
 ### 2. การเตรียมสภาพแวดล้อม (Backend สลับกับ ML Training) 

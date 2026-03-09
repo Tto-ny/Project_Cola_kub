@@ -233,38 +233,113 @@ plt.savefig('03_Risk_Distribution.png', dpi=300)
 print("-> Generated: 03_Risk_Distribution.png")
 
 # ==============================================================================
-# แก้ไขส่วนที่ 4.4 ในโค้ดเดิม เป็นโค้ดด้านล่างนี้ครับ
+# 4.4 Feature Importance — เปรียบเทียบทุกโมเดล
 # ==============================================================================
 
-# --- 4.4 Feature Importance ---
-if hasattr(best_model_obj, 'feature_importances_'):
-    # เตรียมข้อมูล Feature Importance
-    fi_df = pd.read_csv('Landslide_Final_Cleaned_V2.csv').columns.drop(TARGET_COL) # ดึงชื่อ feature เดิมๆมา
-    fi_df = pd.DataFrame({'Feature': features_to_use, 'Importance': best_model_obj.feature_importances_})
-    fi_df = fi_df.sort_values(by='Importance', ascending=False)
+# --- ฟังก์ชันช่วยดึง Feature Importance จากโมเดลทุกประเภท ---
+def get_feature_importance(model, feature_names):
+    """ดึง Feature Importance จากโมเดล; รองรับทั้ง tree-based (feature_importances_)
+    และ linear model (coef_)"""
+    if hasattr(model, 'feature_importances_'):
+        return model.feature_importances_
+    elif hasattr(model, 'coef_'):
+        # สำหรับ Logistic Regression ใช้ค่า absolute ของ coefficient
+        return np.abs(model.coef_[0])
+    else:
+        return None
 
-    # --- รูปที่ 04: Top 10 Feature Importances (เดิม) ---
-    plt.figure(figsize=(10, 6))
-    sns.barplot(x='Importance', y='Feature', data=fi_df.head(10), palette='viridis')
-    plt.title(f'Top 10 Feature Importances ({best_model_name})', weight='bold')
-    plt.tight_layout()
-    plt.savefig('04_Feature_Importance_Top10.png', dpi=300)
-    plt.close() # ปิด plot เพื่อประหยัด memory
-    print("-> Generated: 04_Feature_Importance_Top10.png")
+# --- เก็บ Feature Importance ของทุกโมเดลไว้ในตาราง ---
+all_fi = {}
+for name, model in models.items():
+    fi = get_feature_importance(model, features_to_use)
+    if fi is not None:
+        all_fi[name] = fi
 
-    # --- รูปที่ 05: Top 6 Feature Importances (ใหม่) ---
-    plt.figure(figsize=(10, 5)) # ปรับขนาดให้พอดีกับ 6 ฟีเจอร์
-    sns.barplot(x='Importance', y='Feature', data=fi_df.head(6), palette='mako')
-    plt.title(f'Top 6 Feature Importances ({best_model_name})', weight='bold')
-    plt.tight_layout()
-    plt.savefig('05_Feature_Importance_Top6.png', dpi=300)
-    plt.close()
-    print("-> Generated: 05_Feature_Importance_Top6.png")
+print(f"\n-> โมเดลที่มี Feature Importance: {list(all_fi.keys())}")
 
-    # --- รูปที่ 06: All Feature Importances (ใหม่) ---
-    # สำหรับ All Features ต้องขยายความสูงของรูป (figsize) เพื่อให้เห็นชื่อครบทุกตัว
+# =====================================================================
+# รูปที่ 04: Top 10 Feature Importance — แยกแต่ละโมเดล (subplot grid)
+# =====================================================================
+n_models = len(all_fi)
+n_cols = 3
+n_rows = (n_models + n_cols - 1) // n_cols  # ปัดขึ้น
+
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(7 * n_cols, 5 * n_rows))
+axes = axes.flatten()  # ทำให้เป็น 1D array
+
+# เรียงโมเดลตาม PR-AUC จากมากไปน้อย
+sorted_models = results_df['Model'].tolist()
+
+palettes = ['viridis', 'mako', 'rocket', 'crest', 'flare', 'magma', 'coolwarm']
+
+for idx, model_name in enumerate(sorted_models):
+    if model_name not in all_fi:
+        continue
+    ax = axes[idx]
+    fi_df_tmp = pd.DataFrame({
+        'Feature': features_to_use,
+        'Importance': all_fi[model_name]
+    }).sort_values(by='Importance', ascending=False).head(10)
+
+    palette = palettes[idx % len(palettes)]
+    sns.barplot(x='Importance', y='Feature', data=fi_df_tmp, palette=palette, ax=ax)
+
+    # ดึง PR-AUC มาแสดงด้วย
+    pr_val = results_df.loc[results_df['Model'] == model_name, '_pr_auc_val'].values[0]
+    ax.set_title(f'{model_name}\n(PR-AUC: {pr_val:.4f})', weight='bold', fontsize=11)
+    ax.set_xlabel('Importance')
+    ax.set_ylabel('')
+
+# ซ่อน subplot ที่ว่างเปล่า
+for idx in range(n_models, len(axes)):
+    axes[idx].set_visible(False)
+
+fig.suptitle('Top 10 Feature Importance — All Models Comparison', weight='bold', fontsize=16, y=1.01)
+plt.tight_layout()
+plt.savefig('04_Feature_Importance_Top10.png', dpi=300, bbox_inches='tight')
+plt.close()
+print("-> Generated: 04_Feature_Importance_Top10.png (All Models Grid)")
+
+# =====================================================================
+# รูปที่ 05: Heatmap เปรียบเทียบ Feature Importance ทุกโมเดล (Normalized)
+# =====================================================================
+# สร้าง DataFrame: แถว = Feature, คอลัมน์ = โมเดล (Normalized 0-1)
+heatmap_data = pd.DataFrame(index=features_to_use)
+for name in sorted_models:
+    if name not in all_fi:
+        continue
+    raw = all_fi[name]
+    # Normalize ให้ทุกโมเดลอยู่ในสเกล 0-1 เพื่อเปรียบเทียบตรงกัน
+    max_val = raw.max()
+    heatmap_data[name] = raw / max_val if max_val > 0 else raw
+
+# เรียง feature ตาม importance เฉลี่ยข้ามโมเดล
+heatmap_data['mean'] = heatmap_data.mean(axis=1)
+heatmap_data = heatmap_data.sort_values(by='mean', ascending=False)
+heatmap_data = heatmap_data.drop(columns='mean')
+
+plt.figure(figsize=(14, 10))
+sns.heatmap(heatmap_data, annot=True, fmt='.2f', cmap='YlOrRd', linewidths=0.5,
+            cbar_kws={'label': 'Normalized Importance (0-1)'})
+plt.title('Feature Importance Heatmap — All Models (Normalized)', weight='bold', fontsize=14)
+plt.xlabel('Model')
+plt.ylabel('Feature')
+plt.xticks(rotation=25, ha='right')
+plt.tight_layout()
+plt.savefig('05_Feature_Importance_Heatmap.png', dpi=300, bbox_inches='tight')
+plt.close()
+print("-> Generated: 05_Feature_Importance_Heatmap.png")
+
+# =====================================================================
+# รูปที่ 06: All Feature Importances — Best Model Only (เดิม)
+# =====================================================================
+if hasattr(best_model_obj, 'feature_importances_') or hasattr(best_model_obj, 'coef_'):
+    fi_best = get_feature_importance(best_model_obj, features_to_use)
+    fi_df_best = pd.DataFrame({'Feature': features_to_use, 'Importance': fi_best})
+    fi_df_best = fi_df_best.sort_values(by='Importance', ascending=False)
+
     plt.figure(figsize=(10, 10))
-    sns.barplot(x='Importance', y='Feature', data=fi_df, palette='rocket')
+    sns.barplot(x='Importance', y='Feature', data=fi_df_best, palette='rocket')
     plt.title(f'All Feature Importances ({best_model_name})', weight='bold')
     plt.tight_layout()
     plt.savefig('06_Feature_Importance_All.png', dpi=300)
@@ -272,12 +347,12 @@ if hasattr(best_model_obj, 'feature_importances_'):
     print("-> Generated: 06_Feature_Importance_All.png")
 
 # ==============================================================================
-# จบส่วนที่ต้องแก้ไข
+# จบส่วน Feature Importance
 # ==============================================================================
 
 # Save Best Model
-joblib.dump(best_model_obj, 'best_landslide_model.pkl')
+joblib.dump(best_model_obj, 'best_ml_model.pkl')
 print("\n==================================================")
 print(f"🏆 Pipeline Finished! Best Model: {best_model_name}")
-print("✅ Saved model as 'best_landslide_model.pkl'")
+print("✅ Saved model as 'best_ml_model.pkl'")
 print("==================================================")
