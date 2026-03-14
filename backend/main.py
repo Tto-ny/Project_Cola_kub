@@ -35,9 +35,22 @@ alert_logs = []
 
 @app.on_event("startup")
 def on_startup():
-    from database import Base, engine
+    from database import Base, engine, SessionLocal, HistoricalLandslidePoint
     Base.metadata.create_all(bind=engine)
     load_model()
+    
+    # Auto-load historical points if table is empty
+    db = SessionLocal()
+    try:
+        count = db.query(HistoricalLandslidePoint).count()
+        if count == 0:
+            print("[STARTUP] No historical points found. Auto-loading from CSVs...")
+            from load_historical_points import load as load_historical_data
+            load_historical_data()
+    except Exception as e:
+        print(f"[STARTUP] Error auto-loading historical points: {e}")
+    finally:
+        db.close()
 
 # ── Authentication ──
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
