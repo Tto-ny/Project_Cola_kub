@@ -74,7 +74,7 @@ def predict_risk(features: dict) -> dict:
             # Map prediction using probability threshold
             if max_prob > 0.6:
                 risk = 'High'
-            elif max_prob > 0.2:
+            elif max_prob > 0.25:
                 risk = 'Medium'
             else:
                 risk = 'Low'
@@ -90,7 +90,7 @@ def predict_risk(features: dict) -> dict:
     score = (slope / 45.0) * 0.5 + (min(rainfall, 200) / 200.0) * 0.5
     if score > 0.6:
         risk = 'High'
-    elif score > 0.2:
+    elif score > 0.25:
         risk = 'Medium'
     else:
         risk = 'Low'

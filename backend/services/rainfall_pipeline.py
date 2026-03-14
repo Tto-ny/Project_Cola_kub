@@ -13,13 +13,17 @@ cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
 retry_session = retry(cache_session, retries=5, backoff_factor=0.5)
 openmeteo = openmeteo_requests.Client(session=retry_session)
 
-def generate_control_grid(min_lon=100.2, min_lat=17.9, max_lon=101.6, max_lat=19.8, step=0.05):
+def generate_control_grid(min_lon=100.2, min_lat=17.9, max_lon=101.6, max_lat=19.8, grid_km=5.0):
     """
-    สร้างจุด Control Points ห่างกัน 0.05 องศา (~5 กม.) ให้ครอบคลุมจังหวัดน่าน
-    จะได้พิกัดประมาณ 400-500 จุด
+    สร้างจุด Control Points ห่างกัน 5 กม. (สี่เหลี่ยมจัตุรัส) ให้ครอบคลุมจังหวัดน่าน
+    คำนวณ step แยก lon/lat ตามระยะทางจริงที่ latitude กลาง
     """
-    lons = np.arange(min_lon, max_lon, step)
-    lats = np.arange(min_lat, max_lat, step)
+    center_lat = (min_lat + max_lat) / 2  # ~18.85°
+    step_lon = grid_km / (111.32 * math.cos(math.radians(center_lat)))  # ~0.04744°
+    step_lat = grid_km / 110.54  # ~0.04523°
+    
+    lons = np.arange(min_lon, max_lon, step_lon)
+    lats = np.arange(min_lat, max_lat, step_lat)
     
     control_points = []
     for lat in lats:
@@ -32,16 +36,22 @@ def fetch_openmeteo_batch(control_points):
     """
     ยิง Open-Meteo API ทีละ 100 จุด (ตาม Rate Limit ที่ปลอดภัย)
     ดึงข้อมูล daily precipitation ย้อนหลัง 9 วัน + วันนี้ (รวม 10 วัน)
+    ถ้าโดน Rate Limit จะรอ 65 วินาทีแล้ว Retry (สูงสุด 3 ครั้งต่อ chunk)
     """
-    url = "https://archive-api.open-meteo.com/v1/archive" if False else "https://api.open-meteo.com/v1/forecast" # ใช้ forecast เพื่อดึงปัจจุบัน
+    url = "https://api.open-meteo.com/v1/forecast"
     
     chunk_size = 100
-    all_rainfall = []  # เก็บข้อมูลฝน (10 วัน) ของทุก Control Point ก้อนนี้
+    max_retries = 3
+    rate_limit_wait = 65  # วินาที - รอให้ rate limit หมดอายุ (1 นาที + buffer)
+    inter_chunk_delay = 8  # วินาที - delay ระหว่าง chunk ป้องกัน rate limit
+    all_rainfall = []
     
-    print(f"[Rainfall Pipeline] Fetching {len(control_points)} control points in chunks of {chunk_size}...")
+    total_chunks = math.ceil(len(control_points) / chunk_size)
+    print(f"[Rainfall Pipeline] Fetching {len(control_points)} control points in {total_chunks} chunks of {chunk_size}...")
     
     for i in range(0, len(control_points), chunk_size):
         chunk = control_points[i:i+chunk_size]
+        chunk_num = i // chunk_size + 1
         lats = [c['latitude'] for c in chunk]
         lons = [c['longitude'] for c in chunk]
         
@@ -54,43 +64,51 @@ def fetch_openmeteo_batch(control_points):
             "timezone": "Asia/Bangkok"
         }
         
-        try:
-            # ยิง 1 Request ได้ 100 จุดเลย
-            responses = openmeteo.weather_api(url, params=params)
-            
-            for response in responses:
-                # ข้อมูลรายวันของแต่ละจุด
-                daily = response.Daily()
-                daily_precipitation = daily.Variables(0).ValuesAsNumpy()
+        success = False
+        for attempt in range(1, max_retries + 1):
+            try:
+                responses = openmeteo.weather_api(url, params=params)
                 
-                # แปลง NaN เป็น 0.0 เผื่อฝนพยากรณ์ไม่มี
-                daily_precipitation = np.nan_to_num(daily_precipitation, nan=0.0)
-                
-                # โมเดลต้องการ Day_1 = วันนี้ (ย้อนกลับ) ดังนั้นเราใช้ NumPy พลิก Array
-                daily_precip_reversed = np.flip(daily_precipitation)
-                
-                # เผื่อ API ส่งมาไม่ครบ 10 วัน ก็เติม 0 ให้เต็ม 10 วัน (Padding)
-                if len(daily_precip_reversed) < 10:
-                    pad_width = 10 - len(daily_precip_reversed)
-                    daily_precip_reversed = np.pad(daily_precip_reversed, (0, pad_width), 'constant')
+                for response in responses:
+                    daily = response.Daily()
+                    daily_precipitation = daily.Variables(0).ValuesAsNumpy()
+                    daily_precipitation = np.nan_to_num(daily_precipitation, nan=0.0)
+                    daily_precip_reversed = np.flip(daily_precipitation)
                     
-                # เอาแค่ 10 วัน (Day 1 ถึง Day 10)
-                all_rainfall.append(daily_precip_reversed[:10])
+                    if len(daily_precip_reversed) < 10:
+                        pad_width = 10 - len(daily_precip_reversed)
+                        daily_precip_reversed = np.pad(daily_precip_reversed, (0, pad_width), 'constant')
+                        
+                    all_rainfall.append(daily_precip_reversed[:10])
+                    
+                print(f"  -> Fetched chunk {chunk_num}/{total_chunks}, got {len(chunk)} locations.")
+                success = True
+                break  # ออก retry loop ถ้าสำเร็จ
                 
-            print(f"  -> Fetched chunk {i//chunk_size + 1}, got {len(chunk)} locations.")
-            # พักกันโดน Block (Free tier ให้ 60 calls / min)
-            time.sleep(5.0)
-            
-        except Exception as e:
-            if "Please try again in one minute" in str(e):
-                print(f"[Error] Open-Meteo API Rate Limit hit on chunk {i//chunk_size + 1}: {e}")
-                for _ in range(len(chunk)):
-                    all_rainfall.append(np.zeros(10))
-            else:
-                print(f"[Error] Failed to fetch weather data on chunk {i//chunk_size + 1}: {e}")
-                traceback.print_exc()
-                for _ in range(len(chunk)):
-                    all_rainfall.append(np.zeros(10))
+            except Exception as e:
+                if "Please try again in one minute" in str(e):
+                    if attempt < max_retries:
+                        print(f"[Rate Limit] Chunk {chunk_num} attempt {attempt}/{max_retries} - waiting {rate_limit_wait}s before retry...")
+                        time.sleep(rate_limit_wait)
+                    else:
+                        print(f"[Error] Chunk {chunk_num} failed after {max_retries} retries (Rate Limit). Using zeros.")
+                else:
+                    print(f"[Error] Chunk {chunk_num} attempt {attempt}: {e}")
+                    traceback.print_exc()
+                    if attempt < max_retries:
+                        print(f"  Waiting {rate_limit_wait}s before retry...")
+                        time.sleep(rate_limit_wait)
+                    else:
+                        print(f"[Error] Chunk {chunk_num} failed after {max_retries} retries. Using zeros.")
+        
+        # ถ้าลอง retry หมดแล้วยังไม่สำเร็จ ใส่ 0 แทน
+        if not success:
+            for _ in range(len(chunk)):
+                all_rainfall.append(np.zeros(10))
+        
+        # delay ระหว่าง chunk (ยกเว้น chunk สุดท้าย)
+        if i + chunk_size < len(control_points):
+            time.sleep(inter_chunk_delay)
 
     # แปลงเป็น Numpy Array รูปแบบ (Num_Control_Points, 10)
     return np.array(all_rainfall)
