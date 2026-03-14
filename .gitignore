@@ -33,3 +33,7 @@ backend/.cache.sqlite
 # OS
 .DS_Store
 Thumbs.db
+
+# ML Training Logs
+catboost_info/
+extracted_grid_data.json

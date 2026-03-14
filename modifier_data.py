@@ -95,10 +95,10 @@ def predict_landslide_batch(base_grid_data, model, scaler=None):
         hazard_probs = np.zeros(len(X_values))
     
     # Map ผลลับตาม Thresholds ที่ตั้งไว้ตอนเทรน
-    # <= 0.25 = Low, <= 0.60 = Medium, > 0.60 = High
+    # <= 0.20 = Low, <= 0.80 = Medium, > 0.80 = High
     preds_risk = np.where(
-        hazard_probs <= 0.25, 'Low',
-        np.where(hazard_probs <= 0.60, 'Medium', 'High')
+        hazard_probs <= 0.20, 'Low',
+        np.where(hazard_probs <= 0.80, 'Medium', 'High')
     )
     
     # อัพเดต max_probs ไว้ส่งกลับไปด้วย (เผื่อระบบเดิมใช้ตัวแปรนี้)

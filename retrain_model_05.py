@@ -142,6 +142,7 @@ print("==================================================")
 
 # เรียงลำดับตารางผลลัพธ์จาก PR-AUC มากไปน้อย
 results_df = pd.DataFrame(results).sort_values(by="_pr_auc_val", ascending=False)
+sorted_models = results_df['Model'].tolist()
 
 # 4.1 Comparison Table
 display_df = results_df.drop(columns=["_pr_auc_val"]).reset_index(drop=True)
@@ -202,35 +203,82 @@ print("-> Generated: 02_Performance_Curves.png (Best Model Only)")
 # จบส่วนที่ 4.2 
 # ==============================================================================
 
-# 4.3 Risk Tier Distribution (Grey/Yellow/Red)
-best_p = model_probs[best_model_name]
-landslide_pts = best_p[y_test == 1]
-safe_pts = best_p[y_test == 0]
+# 4.3 Risk Tier Distribution — ทุกโมเดล × 3 Thresholds (0.2, 0.25, 0.3)
+THRESHOLDS = [0.2, 0.25, 0.3]
+HIGH_THRESHOLD = 0.6
 
-def get_tier_pct(p):
-    return [(p <= 0.2).sum()/len(p)*100, ((p > 0.2) & (p <= 0.6)).sum()/len(p)*100, (p > 0.6).sum()/len(p)*100]
+def get_tier_pct(p, med_th, high_th):
+    """คืนค่า [Low%, Medium%, High%] ตาม threshold ที่กำหนด"""
+    return [
+        (p <= med_th).sum() / len(p) * 100,
+        ((p > med_th) & (p <= high_th)).sum() / len(p) * 100,
+        (p > high_th).sum() / len(p) * 100
+    ]
 
-tier_landslide = get_tier_pct(landslide_pts)
-tier_safe = get_tier_pct(safe_pts)
+n_models = len(models)
+n_cols = 3
+n_rows = (n_models + n_cols - 1) // n_cols
 
-fig, ax = plt.subplots(figsize=(8, 5))
-labels = ['Actual Landslide (1)', 'Safe Zone (0)']
-b1 = ax.bar(labels, [tier_landslide[0], tier_safe[0]], label='Low Risk (<= 0.2)', color='#A6A6A6')
-b2 = ax.bar(labels, [tier_landslide[1], tier_safe[1]], bottom=[tier_landslide[0], tier_safe[0]], label='Medium Risk (0.2 - 0.6)', color='#FFC000')
-b3 = ax.bar(labels, [tier_landslide[2], tier_safe[2]], bottom=[tier_landslide[0]+tier_landslide[1], tier_safe[0]+tier_safe[1]], label='High Risk (> 0.6)', color='#FF0000')
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(8 * n_cols, 6 * n_rows))
+axes = axes.flatten()
 
-plt.ylabel('Percentage (%)')
-plt.title(f'Risk Tier Distribution by {best_model_name}', weight='bold')
-plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+bar_colors = {'Low': '#A6A6A6', 'Medium': '#FFC000', 'High': '#FF0000'}
 
-for i, (l, m, h) in enumerate(zip([tier_landslide[0], tier_safe[0]], [tier_landslide[1], tier_safe[1]], [tier_landslide[2], tier_safe[2]])):
-    if h > 5: ax.text(i, l + m + h/2, f'{h:.1f}%', ha='center', va='center', color='white', weight='bold')
-    if m > 5: ax.text(i, l + m/2, f'{m:.1f}%', ha='center', va='center', color='black', weight='bold')
-    if l > 5: ax.text(i, l/2, f'{l:.1f}%', ha='center', va='center', color='black', weight='bold')
-    
+for idx, model_name in enumerate(sorted_models):
+    ax = axes[idx]
+    probs = model_probs[model_name]
+    landslide_pts = probs[y_test == 1]
+    safe_pts = probs[y_test == 0]
+
+    # สร้าง grouped bar: 3 thresholds × 2 groups = 6 bars
+    x_labels = []
+    low_vals, med_vals, high_vals = [], [], []
+
+    for th in THRESHOLDS:
+        for group_name, group_data in [('Landslide', landslide_pts), ('Safe', safe_pts)]:
+            tiers = get_tier_pct(group_data, th, HIGH_THRESHOLD)
+            low_vals.append(tiers[0])
+            med_vals.append(tiers[1])
+            high_vals.append(tiers[2])
+            x_labels.append(f'th={th}\n{group_name}')
+
+    x = np.arange(len(x_labels))
+    width = 0.6
+
+    ax.bar(x, low_vals, width, label=f'Low', color=bar_colors['Low'])
+    ax.bar(x, med_vals, width, bottom=low_vals, label=f'Medium', color=bar_colors['Medium'])
+    bottoms_high = [l + m for l, m in zip(low_vals, med_vals)]
+    ax.bar(x, high_vals, width, bottom=bottoms_high, label=f'High (>{HIGH_THRESHOLD})', color=bar_colors['High'])
+
+    # ใส่ตัวเลข %
+    for i in range(len(x_labels)):
+        l, m, h = low_vals[i], med_vals[i], high_vals[i]
+        if h > 4: ax.text(i, l + m + h/2, f'{h:.1f}%', ha='center', va='center', color='white', weight='bold', fontsize=8)
+        if m > 4: ax.text(i, l + m/2, f'{m:.1f}%', ha='center', va='center', color='black', weight='bold', fontsize=8)
+        if l > 4: ax.text(i, l/2, f'{l:.1f}%', ha='center', va='center', color='black', weight='bold', fontsize=8)
+
+    pr_val = next((r['_pr_auc_val'] for r in results if r['Model'] == model_name), 0)
+    ax.set_title(f'{model_name}\n(PR-AUC: {pr_val:.4f})', weight='bold', fontsize=11)
+    ax.set_xticks(x)
+    ax.set_xticklabels(x_labels, fontsize=8)
+    ax.set_ylabel('Percentage (%)')
+    ax.set_ylim(0, 105)
+    if idx == 0:
+        ax.legend(fontsize=9, loc='upper right')
+
+    # เส้นแบ่งระหว่าง threshold groups
+    for sep in [1.5, 3.5]:
+        ax.axvline(x=sep, color='gray', linestyle='--', alpha=0.3, lw=0.8)
+
+# ซ่อน subplot ว่าง
+for idx in range(n_models, len(axes)):
+    axes[idx].set_visible(False)
+
+fig.suptitle('Risk Tier Distribution — All Models × Thresholds (0.2 / 0.25 / 0.3)', weight='bold', fontsize=16, y=1.01)
 plt.tight_layout()
-plt.savefig('03_Risk_Distribution.png', dpi=300)
-print("-> Generated: 03_Risk_Distribution.png")
+plt.savefig('03_Risk_Distribution.png', dpi=300, bbox_inches='tight')
+plt.close()
+print("-> Generated: 03_Risk_Distribution.png (All Models × 3 Thresholds)")
 
 # ==============================================================================
 # 4.4 Feature Importance — เปรียบเทียบทุกโมเดล
@@ -350,9 +398,32 @@ if hasattr(best_model_obj, 'feature_importances_') or hasattr(best_model_obj, 'c
 # จบส่วน Feature Importance
 # ==============================================================================
 
-# Save Best Model
+# Save ALL Models to all_model/ folder
+import os
+all_model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'all_model')
+os.makedirs(all_model_dir, exist_ok=True)
+
+print("\n==================================================")
+print("5. Saving ALL Models to 'all_model/' ...")
+print("==================================================")
+
+# Save scaler (ต้องใช้คู่กับทุกโมเดล)
+scaler_path = os.path.join(all_model_dir, 'landslide_scaler.pkl')
+joblib.dump(scaler, scaler_path)
+print(f"  -> Saved: {scaler_path}")
+
+for name, model in models.items():
+    # แปลงชื่อให้เป็นชื่อไฟล์ได้ เช่น "LightGBM (Tuned)" -> "LightGBM_Tuned"
+    safe_name = name.replace(" ", "_").replace("(", "").replace(")", "").strip("_")
+    model_path = os.path.join(all_model_dir, f'{safe_name}.pkl')
+    joblib.dump(model, model_path)
+    pr_val = next((r['_pr_auc_val'] for r in results if r['Model'] == name), 0)
+    print(f"  -> Saved: {model_path}  (PR-AUC: {pr_val:.4f})")
+
+# Save Best Model (เหมือนเดิม)
 joblib.dump(best_model_obj, 'best_ml_model.pkl')
 print("\n==================================================")
 print(f"🏆 Pipeline Finished! Best Model: {best_model_name}")
-print("✅ Saved model as 'best_ml_model.pkl'")
+print(f"✅ Saved best model as 'best_ml_model.pkl'")
+print(f"📦 Saved ALL {len(models)} models + scaler to 'all_model/' folder")
 print("==================================================")

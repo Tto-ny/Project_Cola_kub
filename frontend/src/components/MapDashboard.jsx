@@ -112,6 +112,9 @@ export default function MapDashboard() {
     const [historicalPoints, setHistoricalPoints] = useState([]);
     const [showHistorical, setShowHistorical] = useState(false);
 
+    // Confirmation Dialog
+    const [confirmDialog, setConfirmDialog] = useState(null);
+
     // Mapped Alerts based on predictions — all risk levels, top 100 by probability
     const MAPPED_ALERTS = React.useMemo(() => {
         let alerts = [...gridData];
@@ -271,7 +274,7 @@ export default function MapDashboard() {
         return 'timeout';
     };
 
-    const handleExtract = async () => {
+    const executeExtract = async () => {
         setLoading(true); setStatus('Starting...'); addLog('POST /api/extract_grid');
         try {
             await fetch(`${API}/api/extract_grid`, {
@@ -287,7 +290,17 @@ export default function MapDashboard() {
         finally { setLoading(false); }
     };
 
-    const handlePredictNow = async () => {
+    const handleExtract = () => {
+        setConfirmDialog({
+            title: '⚠️ ยืนยันการดึงข้อมูล GEE',
+            message: 'การดึงข้อมูลจาก Google Earth Engine และเซฟตารางลงฐานข้อมูลใช้เวลาค่อนข้างนาน (ประมาณ 10-15 นาที) ต้องการดำเนินการต่อหรือไม่?',
+            confirmText: '🚀 Extract Data',
+            confirmColor: '#3b82f6',
+            action: executeExtract
+        });
+    };
+
+    const executePredictNow = async () => {
         setPredicting(true); setStatus('Fetching rainfall & predicting...'); addLog('POST /api/predict_now');
         try {
             const data = await (await fetch(`${API}/api/predict_now`, {
@@ -303,6 +316,16 @@ export default function MapDashboard() {
             }
         } catch (e) { addLog(`Error: ${e.message}`); }
         finally { setPredicting(false); }
+    };
+
+    const handlePredictNow = () => {
+        setConfirmDialog({
+            title: '⚡ ดึงข้อมูลน้ำฝนและทำนายใหม่',
+            message: 'ระบบจะดึงปริมาณน้ำฝนปัจจุบันจาก Open-Meteo และคำนวณความเสี่ยงใหม่ทั้ง 117,000+ จุด (ใช้เวลาสักครู่) ดำเนินการต่อเลยไหม?',
+            confirmText: '⚡ Predict Now',
+            confirmColor: '#ef4444',
+            action: executePredictNow
+        });
     };
 
     const handleMapClick = (info) => {
@@ -1019,6 +1042,47 @@ export default function MapDashboard() {
                 </div>
 
             </div>
+
+            {/* Confirmation Dialog Overlay */}
+            {confirmDialog && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)',
+                    zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: "'Inter','Segoe UI',sans-serif", animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        background: 'rgba(20,20,32,0.95)', border: '1px solid rgba(255,255,255,0.1)',
+                        padding: '28px 24px', borderRadius: 20, width: 420, maxWidth: '90%',
+                        boxShadow: '0 24px 50px rgba(0,0,0,0.8)', color: '#fff', textAlign: 'center'
+                    }}>
+                        <h2 style={{ margin: '0 0 12px 0', fontSize: 18, fontWeight: 700 }}>{confirmDialog.title}</h2>
+                        <p style={{ margin: '0 0 28px 0', fontSize: 13, color: '#9ca3af', lineHeight: 1.6 }}>{confirmDialog.message}</p>
+                        <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+                            <button onClick={() => setConfirmDialog(null)} style={{
+                                padding: '12px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)',
+                                background: 'rgba(255,255,255,0.05)', color: '#e5e7eb', cursor: 'pointer', fontSize: 13, fontWeight: 600, flex: 1,
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}>
+                                ยกเลิก (Cancel)
+                            </button>
+                            <button onClick={() => { setConfirmDialog(null); confirmDialog.action(); }} style={{
+                                padding: '12px 0', borderRadius: 10, border: 'none',
+                                background: confirmDialog.confirmColor, color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 700, flex: 1,
+                                boxShadow: `0 4px 12px ${confirmDialog.confirmColor}40`,
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.opacity = 0.9}
+                            onMouseLeave={e => e.currentTarget.style.opacity = 1}>
+                                {confirmDialog.confirmText}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 }
