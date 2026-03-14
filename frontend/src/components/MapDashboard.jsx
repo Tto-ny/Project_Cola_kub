@@ -240,8 +240,8 @@ export default function MapDashboard() {
                 filled: true,
                 extruded: false,
                 getPolygon: d => d.polygon,
-                getFillColor: [255, 180, 50, 160],
-                getLineColor: [200, 130, 20, 255],
+                getFillColor: [168, 85, 247, 160],
+                getLineColor: [139, 92, 246, 255],
                 getLineWidth: 2,
                 lineWidthMinPixels: 1,
             }));
@@ -456,7 +456,7 @@ export default function MapDashboard() {
                         if (object.tambons) html += `<span style="color:#aaa;">ตำบล:</span> ${object.tambons}<br/>`;
                         if (object.districts) html += `<span style="color:#aaa;">อำเภอ:</span> ${object.districts}`;
                         html += `</div>`;
-                        return { html, style: { background: 'rgba(20,20,30,0.95)', color: '#eee', borderRadius: 8, padding: 10, border: '1px solid #b45309', backdropFilter: 'blur(4px)' } };
+                        return { html, style: { background: 'rgba(20,20,30,0.95)', color: '#eee', borderRadius: 8, padding: 10, border: '1px solid #8b5cf6', backdropFilter: 'blur(4px)' } };
                     }
 
                     const props = object.properties || {};
@@ -657,7 +657,7 @@ export default function MapDashboard() {
                         <div style={{ marginBottom: 10 }}>
                             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, cursor: 'pointer', color: '#ccc' }}>
                                 <input type="checkbox" checked={showHistorical} onChange={() => setShowHistorical(v => !v)} />
-                                <span style={{ width: 10, height: 10, borderRadius: 2, background: 'rgba(255,180,50,0.85)' }} />
+                                <span style={{ width: 10, height: 10, borderRadius: 2, background: 'rgba(168, 85, 247, 0.85)' }} />
                                 📍 จุดดินถล่มในอดีต ({historicalGridCells.length} กริด)
                             </label>
                         </div>
